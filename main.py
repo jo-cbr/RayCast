@@ -1,4 +1,4 @@
-import pygame, math
+import pygame, math, random
 from pygame_button import Button
 from maze_generator import *
 
@@ -112,6 +112,9 @@ SPRAY3 = pygame.image.load('assets/animations/spray_overlay3.png').convert_alpha
 SPRAY4 = pygame.image.load('assets/animations/spray_overlay4.png').convert_alpha()
 SPRAY5 = pygame.image.load('assets/animations/spray_overlay5.png').convert_alpha()
 SPRAY_ANIMATION = [SPRAY1, SPRAY2, SPRAY3, SPRAY4, SPRAY5]
+
+GLOWSTICK_TEXTURE = pygame.image.load('assets/glowstick.png').convert_alpha()
+
 #endregion
 column_cache = {}
 CACHE_MAX_SIZE = 2048
@@ -127,6 +130,7 @@ def draw_scene():
     draw_ray_data(ray_data)
     draw_energy()
     draw_timer()
+    draw_sprites()
     screen.blit(VIGNETTE_SURF, (0, 0))
 
 def draw_energy():
@@ -206,6 +210,45 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
     if grid_value == 2:
         screen.fill((64, 0, 0), rect, special_flags=pygame.BLEND_ADD)
     screen.fill((shadow_color, shadow_color, shadow_color), rect, special_flags=pygame.BLEND_SUB)
+
+SPRITES = [
+
+]
+def draw_sprites():
+    # Sprites nach Distanz sortieren
+    if len(SPRITES) == 0:
+        return
+    sorted_sprites = SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
+
+    for sprite in sorted_sprites:
+        dx = sprite['x'] - player_x
+        dy = sprite['y'] - player_y
+        distance = math.sqrt(dx*dx + dy*dy) # Pythagoras
+
+        # Spriterotation anhand vom Winkel vom Abstandsvektor berechnen
+        sprite_angle = math.atan2(dy, dx) - player_angle
+
+
+        screen_x = int((WIDTH / 2) * (1 + math.tan(sprite_angle) / math.tan(FOV/2)))
+
+        scale = PROJ_PLANE / distance
+        sprite_h = int(sprite['texture'].get_height() * scale)
+        sprite_w = int(sprite['texture'].get_width() * scale)
+
+        top_y = int(center_y - sprite_h / 2 + bob_offset_y + cam_pitch)
+
+        left_x = screen_x - sprite_w//2
+        right_x = screen_x + sprite_w//2
+
+        for x in range(max(0, left_x), min(WIDTH, right_x)):
+            # Prüfen ob hinter Wand
+            if distance < Z_BUFFER[x]:
+                # Spalte in der Textur berechnen
+                texture_x = int((x - left_x) / sprite_w * sprite['texture'].get_width())
+                # Spalte aus Textur nehmen
+                col_surf = sprite['texture'].subsurface((texture_x, 0, 1, sprite['texture'].get_height()))
+                col_scaled = pygame.transform.scale(col_surf, (1, sprite_h)) # Skalieren
+                screen.blit(col_scaled, (x, top_y))
 #endregion
 
 #region Ray Cast Funcs
@@ -518,17 +561,25 @@ def loading_screen(text):
 # Main Loop
 def main():
     global cam_pitch, player_view, PLAYING, GRID_HEIGHT, GRID_WIDTH, \
-        player_x, player_y, player_spawn, world, TIMER
+        player_x, player_y, player_spawn, world, TIMER, SPRITES
     mouse_visible = False
     mouse_grab = True
     pygame.mouse.set_visible(mouse_visible)
     pygame.event.set_grab(mouse_grab)
+    
+    glowstick_colors = [
+        (255, 0, 0), (0, 255, 0),
+        (0, 0, 255), (255, 255, 0),
+        (0, 255, 255), (255, 0, 255), 
+        (255, 200, 0), (128, 0, 255)
+    ]
+
     spray_cooldown = 1.0
     last_sprayed = 1.0
-    
     spray_frame = 1
     spray_surf = pygame.Surface((32, 32), pygame.SRCALPHA)
     
+    # World Creation and Setup
     if not PLAYING:
         TIMER = 0
         while True:
@@ -551,10 +602,7 @@ def main():
 
         PLAYING = True
 
-    test_surf = pygame.Surface((1, 8))
-    test_surf.fill((255,0,0))
     clock.tick(FPS)
-    print(cur_size)
     while True:
         dt_ms = clock.tick(FPS)
         delta_time = dt_ms * 0.001
@@ -575,6 +623,10 @@ def main():
                 
                 if event.key == pygame.K_f:
                     if last_sprayed >= spray_cooldown:
+                        r, g, b = random.choice(glowstick_colors)
+                        a = 128
+                        glowstick_text = GLOWSTICK_TEXTURE.fill((r, g, b, a), special_flags=pygame.BLEND_RGBA_MULT)
+                        SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_text})
                         player_view = cast_single_ray(int(WIDTH*0.5)-1, FOV*0.5, int(player_x), int(player_y), math.cos(player_angle), math.sin(player_angle))
                         if player_view[2] <= 2: # wenn nah genug
                             spray_y, spray_x = player_view[6]
