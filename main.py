@@ -218,16 +218,24 @@ def draw_sprites():
     # Sprites nach Distanz sortieren
     if len(SPRITES) == 0:
         return
-    sorted_sprites = SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
-
-    for sprite in sorted_sprites:
+    
+    SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
+    half_fov = FOV*0.5
+    for sprite in SPRITES:
         dx = sprite['x'] - player_x
         dy = sprite['y'] - player_y
-        distance = math.sqrt(dx*dx + dy*dy) # Pythagoras
+        distance = max(math.sqrt(dx*dx + dy*dy), 0.1) # Pythagoras
 
         # Spriterotation anhand vom Winkel vom Abstandsvektor berechnen
         sprite_angle = math.atan2(dy, dx) - player_angle
+        
+        while sprite_angle < -math.pi:
+            sprite_angle += 2*math.pi
+        while sprite_angle > math.pi:
+            sprite_angle -= 2*math.pi
 
+        if sprite_angle < -half_fov or sprite_angle > half_fov:
+            continue
 
         screen_x = int((WIDTH / 2) * (1 + math.tan(sprite_angle) / math.tan(FOV/2)))
 
@@ -235,7 +243,10 @@ def draw_sprites():
         sprite_h = int(sprite['texture'].get_height() * scale)
         sprite_w = int(sprite['texture'].get_width() * scale)
 
-        top_y = int(center_y - sprite_h / 2 + bob_offset_y + cam_pitch)
+        sprite_h = min(sprite_h, HEIGHT * 2)
+        sprite_w = min(sprite_w, WIDTH * 2)
+
+        top_y = int(sprite_h / 2 + bob_offset_y + cam_pitch)
 
         left_x = screen_x - sprite_w//2
         right_x = screen_x + sprite_w//2
@@ -623,9 +634,9 @@ def main():
                 
                 if event.key == pygame.K_f:
                     if last_sprayed >= spray_cooldown:
-                        r, g, b = random.choice(glowstick_colors)
-                        a = 128
-                        glowstick_text = GLOWSTICK_TEXTURE.fill((r, g, b, a), special_flags=pygame.BLEND_RGBA_MULT)
+                        col = random.choice(glowstick_colors)
+                        glowstick_text = GLOWSTICK_TEXTURE
+                        glowstick_text.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
                         SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_text})
                         player_view = cast_single_ray(int(WIDTH*0.5)-1, FOV*0.5, int(player_x), int(player_y), math.cos(player_angle), math.sin(player_angle))
                         if player_view[2] <= 2: # wenn nah genug
