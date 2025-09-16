@@ -546,6 +546,8 @@ def place_checkpoints(start, end):
             candidates.append((r, c))
 
     steps = math.floor(4 * cur_size/128)
+    if steps == 0:
+        return
     step_size = cur_size/steps
     for s in range(1, steps):
         start_y = start[0]
