@@ -28,7 +28,6 @@ walk_cycle = 0
 bob_offset_x = bob_offset_y = 0
 
 Z_BUFFER = [0.0] * WIDTH
-
 def set_spawn_and_end():
 
     height, width = len(world), len(world[0])
@@ -128,9 +127,9 @@ def draw_scene():
     screen.fill((0, 0, 0))
     ray_data = cast_rays()
     draw_ray_data(ray_data)
+    draw_sprites()
     draw_energy()
     draw_timer()
-    draw_sprites()
     screen.blit(VIGNETTE_SURF, (0, 0))
 
 def draw_energy():
@@ -214,7 +213,7 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
 SPRITES = [
 
 ]
-SCALE_FACTOR = 5
+SCALE_FACTOR = 10
 def draw_sprites():
     # Sprites nach Distanz sortieren
     if len(SPRITES) == 0:
@@ -226,21 +225,18 @@ def draw_sprites():
     plane_x = -dir_y * math.tan(half_fov)
     plane_y = dir_x * math.tan(half_fov)
 
+    det = plane_x * dir_y - dir_x * plane_y
+    inv_det = 1 / det
+
     SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
 
     for sprite in SPRITES:
         sprite_x = sprite['x'] - player_x
         sprite_y = sprite['y'] - player_y
-        
 
         texture = sprite['texture']
         texture_width = texture.get_width()
         texture_height = texture.get_height()
-
-        det = plane_x * dir_y - dir_x * plane_y
-        if det == 0:
-            continue
-        inv_det = 1 / det
         
         transform_x = inv_det * (dir_y * sprite_x - dir_x * sprite_y)
         transform_y = inv_det * (-plane_y * sprite_x + plane_x * sprite_y)
@@ -248,27 +244,27 @@ def draw_sprites():
             continue
 
         sprite_screen_x = int((WIDTH/2) * (1 + transform_x / transform_y))
+        if not (0 <= sprite_screen_x < WIDTH):
+            continue
 
         sprite_height = abs(int(texture_height / transform_y * SCALE_FACTOR))
         sprite_width = abs(int(texture_width / transform_y * SCALE_FACTOR))
+
+        proj_wall_h = abs(int(HEIGHT / transform_y))
+        wall_bottom_y = int(center_y + proj_wall_h//2 + cam_pitch + bob_offset_y)
+        draw_start_y = wall_bottom_y + 2*sprite_height
         
-        #bottom_y = int(center_y + half_h + bob_offset_y + cam_pitch)
-        draw_end_y = int(center_y + bob_offset_y + cam_pitch)
-        draw_start_y = draw_end_y + sprite_height
-        if draw_start_y < -sprite_height: continue
-        
-        draw_start_x = -sprite_width / 2 + sprite_screen_x
-        if draw_start_x < 0: draw_start_x = 0
-        draw_end_x = sprite_width / 2 + sprite_screen_x
+        draw_start_x = -sprite_width // 2 + sprite_screen_x
+        if draw_start_x < -sprite_width: draw_start_x = 0
+        draw_end_x = sprite_width // 2 + sprite_screen_x
         if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
-
-        for stripe in range(int(draw_start_x), int(draw_end_x)):
-            texture_x = int((stripe - (-sprite_width / 2 + sprite_screen_x)) * texture_width / sprite_width)
-
-            if transform_y > 0 and transform_y < Z_BUFFER[stripe]:
-                column = texture.subsurface((texture_x, 0, 1, texture_height))
-                column_scaled = pygame.transform.smoothscale(column, (sprite_width/texture_width, sprite_height))
-                screen.blit(column_scaled, (stripe, draw_start_y))
+        
+        scaled_texture = pygame.transform.smoothscale(texture, (sprite_width, sprite_height))
+        for stripe in range(draw_start_x, draw_end_x):
+            if transform_y < Z_BUFFER[stripe]:
+                tex_x = stripe - draw_start_x
+                column = scaled_texture.subsurface((tex_x, 0, 1, sprite_height))
+                screen.blit(column, (stripe, draw_start_y))
 
 #endregion
 
@@ -645,31 +641,18 @@ def main():
                 if event.key == pygame.K_f:
                     if last_sprayed >= spray_cooldown:
                         col = random.choice(glowstick_colors)
-                        glowstick_text = GLOWSTICK_TEXTURE
-                        glowstick_text.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
-                        SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_text})
-                        print({'x': player_x, 'y': player_y})
-                        player_view = cast_single_ray(int(WIDTH*0.5)-1, FOV*0.5, int(player_x), int(player_y), math.cos(player_angle), math.sin(player_angle))
-                        if player_view[2] <= 2: # wenn nah genug
-                            spray_y, spray_x = player_view[6]
-                            if world[spray_y][spray_x] == 1:
-                                player_action_channel.play(spray_sound)
-                                world[spray_y][spray_x] = 3
-                                spray_frame=1
-                                last_sprayed = 0
+                        glowstick_tex = GLOWSTICK_TEXTURE.copy()
+                        glowstick_tex.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
+                        SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_tex})
+                        spray_frame=1
+                        last_sprayed = 0
 
         handle_random_sounds()
         draw_scene()
         player_controller(delta_time)
 
         if last_sprayed < spray_cooldown:
-            if last_sprayed < spray_cooldown*0.5:
-                spray_surf.fill((0,0,0,0))
-                screen.blit(pygame.transform.scale(SPRAY_ANIMATION[spray_frame-1], (256, 256)), (WIDTH*0.5, HEIGHT-256))
-                spray_frame += int(last_sprayed*5)
-                spray_frame = min(spray_frame, 5)
             last_sprayed += delta_time
-
 
         pygame.display.update()
 
