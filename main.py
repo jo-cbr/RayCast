@@ -214,52 +214,62 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
 SPRITES = [
 
 ]
+SCALE_FACTOR = 5
 def draw_sprites():
     # Sprites nach Distanz sortieren
     if len(SPRITES) == 0:
         return
-    
-    SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
     half_fov = FOV*0.5
+
+    dir_x = math.cos(player_angle)
+    dir_y = math.sin(player_angle)
+    plane_x = -dir_y * math.tan(half_fov)
+    plane_y = dir_x * math.tan(half_fov)
+
+    SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
+
     for sprite in SPRITES:
-        dx = sprite['x'] - player_x
-        dy = sprite['y'] - player_y
-        distance = max(math.sqrt(dx*dx + dy*dy), 0.1) # Pythagoras
-
-        # Spriterotation anhand vom Winkel vom Abstandsvektor berechnen
-        sprite_angle = math.atan2(dy, dx) - player_angle
+        sprite_x = sprite['x'] - player_x
+        sprite_y = sprite['y'] - player_y
         
-        while sprite_angle < -math.pi:
-            sprite_angle += 2*math.pi
-        while sprite_angle > math.pi:
-            sprite_angle -= 2*math.pi
 
-        if sprite_angle < -half_fov or sprite_angle > half_fov:
+        texture = sprite['texture']
+        texture_width = texture.get_width()
+        texture_height = texture.get_height()
+
+        det = plane_x * dir_y - dir_x * plane_y
+        if det == 0:
+            continue
+        inv_det = 1 / det
+        
+        transform_x = inv_det * (dir_y * sprite_x - dir_x * sprite_y)
+        transform_y = inv_det * (-plane_y * sprite_x + plane_x * sprite_y)
+        if transform_y < 0.1:
             continue
 
-        screen_x = int((WIDTH / 2) * (1 + math.tan(sprite_angle) / math.tan(FOV/2)))
+        sprite_screen_x = int((WIDTH/2) * (1 + transform_x / transform_y))
 
-        scale = PROJ_PLANE / distance
-        sprite_h = int(sprite['texture'].get_height() * scale)
-        sprite_w = int(sprite['texture'].get_width() * scale)
+        sprite_height = abs(int(texture_height / transform_y * SCALE_FACTOR))
+        sprite_width = abs(int(texture_width / transform_y * SCALE_FACTOR))
+        
+        #bottom_y = int(center_y + half_h + bob_offset_y + cam_pitch)
+        draw_end_y = int(center_y + bob_offset_y + cam_pitch)
+        draw_start_y = draw_end_y + sprite_height
+        if draw_start_y < -sprite_height: continue
+        
+        draw_start_x = -sprite_width / 2 + sprite_screen_x
+        if draw_start_x < 0: draw_start_x = 0
+        draw_end_x = sprite_width / 2 + sprite_screen_x
+        if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
 
-        sprite_h = min(sprite_h, HEIGHT * 2)
-        sprite_w = min(sprite_w, WIDTH * 2)
+        for stripe in range(int(draw_start_x), int(draw_end_x)):
+            texture_x = int((stripe - (-sprite_width / 2 + sprite_screen_x)) * texture_width / sprite_width)
 
-        top_y = int(sprite_h / 2 + bob_offset_y + cam_pitch)
+            if transform_y > 0 and transform_y < Z_BUFFER[stripe]:
+                column = texture.subsurface((texture_x, 0, 1, texture_height))
+                column_scaled = pygame.transform.smoothscale(column, (sprite_width/texture_width, sprite_height))
+                screen.blit(column_scaled, (stripe, draw_start_y))
 
-        left_x = screen_x - sprite_w//2
-        right_x = screen_x + sprite_w//2
-
-        for x in range(max(0, left_x), min(WIDTH, right_x)):
-            # Prüfen ob hinter Wand
-            if distance < Z_BUFFER[x]:
-                # Spalte in der Textur berechnen
-                texture_x = int((x - left_x) / sprite_w * sprite['texture'].get_width())
-                # Spalte aus Textur nehmen
-                col_surf = sprite['texture'].subsurface((texture_x, 0, 1, sprite['texture'].get_height()))
-                col_scaled = pygame.transform.scale(col_surf, (1, sprite_h)) # Skalieren
-                screen.blit(col_scaled, (x, top_y))
 #endregion
 
 #region Ray Cast Funcs
@@ -361,7 +371,7 @@ def cast_single_ray(i, half_fov, map_x, map_y, dir_x, dir_y):
 
     wall_pos = (map_y, map_x)
     wall_height = int((1.0 / perp_distance) * PROJ_PLANE * GLOBAL_WALL_SCALE)
-    Z_BUFFER[i] = perp_distance
+    Z_BUFFER[i] = raw_dist
 
     return wall_height, i, perp_distance, side, grid_value, text_x, wall_pos
 #endregion
@@ -638,6 +648,7 @@ def main():
                         glowstick_text = GLOWSTICK_TEXTURE
                         glowstick_text.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
                         SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_text})
+                        print({'x': player_x, 'y': player_y})
                         player_view = cast_single_ray(int(WIDTH*0.5)-1, FOV*0.5, int(player_x), int(player_y), math.cos(player_angle), math.sin(player_angle))
                         if player_view[2] <= 2: # wenn nah genug
                             spray_y, spray_x = player_view[6]
