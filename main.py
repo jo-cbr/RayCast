@@ -36,8 +36,9 @@ def set_spawn_and_end():
     goal_points = [
         (width-2, y) for y in range(height-2)
         if (world[y][width-2] == 0) and
-        ((world[y-1][width-2] == 0 and world[y+1][width-2] != 0) or
-        (world[y+1][width-2] == 0 and world[y-11][width-2] != 0))
+       ( (world[y-1][width-2] == 0 and world[y+1][width-2] != 0 and world[y][width-3] != 0) or
+        (world[y+1][width-2] == 0 and world[y-1][width-2] != 0 and world[y][width-3] != 0) or
+        (world[y+1][width-2] != 0 and world[y-1][width-2] != 0 and world[y][width-3] == 0))
     ]
 
     # Punkte Links im Labyrinth
