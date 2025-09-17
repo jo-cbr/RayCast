@@ -17,7 +17,7 @@ MAX_DISTANCE = 32
 MAX_VIEW_DISTANCE = 8
 
 WIDTH, HEIGHT = 1920, 1080
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN, vsync=True)
+screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
 center_y = HEIGHT // 2
 
 FOV = math.radians(60)
@@ -51,7 +51,8 @@ def set_spawn_and_end():
 
     return p1, p2
 
-player_spawn = player_x, player_y = set_spawn_and_end()
+_, player_spawn = set_spawn_and_end()
+player_y, player_x = player_spawn
 
 player_energy = 100
 player_view = None
