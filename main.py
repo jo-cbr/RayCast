@@ -96,7 +96,6 @@ PROJ_PLANE = (WIDTH / 2) / math.tan(FOV * 0.5)
 BG_IMAGE = pygame.image.load('assets/main_background.png').convert()
 
 WALL_TEXTURE = pygame.image.load('assets/bushwall.png').convert()
-MARKED_WALL_TEXTURE = pygame.image.load('assets/marked_bushwall.png').convert()
 CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/checkpoint_wall.png')
 SAVED_CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/saved_checkpoint_wall.png')
 
@@ -153,7 +152,7 @@ def draw_ray_data(ray_data):
     textures = {
         1: WALL_TEXTURE,
         2: WALL_TEXTURE,
-        3: MARKED_WALL_TEXTURE,
+        #3: MARKED_WALL_TEXTURE,
         4: CHECKPOINT_WALL_TEXTURE,
         5: SAVED_CHECKPOINT_WALL_TEXTURE,
     }
