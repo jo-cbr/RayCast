@@ -211,9 +211,8 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
         screen.fill((64, 0, 0), rect, special_flags=pygame.BLEND_ADD)
     screen.fill((shadow_color, shadow_color, shadow_color), rect, special_flags=pygame.BLEND_SUB)
 
-SPRITES = [
+SPRITES = []
 
-]
 SCALE_FACTOR = 10
 def draw_sprites():
     # Sprites nach Distanz sortieren
@@ -253,19 +252,21 @@ def draw_sprites():
 
         proj_wall_h = abs(int(HEIGHT / transform_y))
         wall_bottom_y = int(center_y + proj_wall_h//2 + cam_pitch + bob_offset_y)
-        draw_start_y = wall_bottom_y - sprite_height
+        draw_start_y = wall_bottom_y - sprite_height//2
         
         draw_start_x = -sprite_width // 2 + sprite_screen_x
         if draw_start_x < -sprite_width: draw_start_x = 0
         draw_end_x = sprite_width // 2 + sprite_screen_x
         if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
-        
-        scaled_texture = pygame.transform.smoothscale(texture, (sprite_width, sprite_height))
+
         for stripe in range(draw_start_x, draw_end_x):
-            if stripe < 0: continue
+            if stripe < 0 or stripe > WIDTH: continue
             if transform_y < Z_BUFFER[stripe]:
-                tex_x = stripe - draw_start_x
-                column = scaled_texture.subsurface((tex_x, 0, 1, sprite_height))
+                tex_x = min(int((stripe - draw_start_x) * texture_width / sprite_width), texture_width-2)
+                column = pygame.transform.scale(
+                    texture.subsurface((tex_x, 0, 1, texture_height)),
+                    (6 , sprite_height)
+                )
                 screen.blit(column, (stripe, draw_start_y))
 
 #endregion
@@ -538,7 +539,7 @@ class Patroller:
         self.target_pos = None
         self.cur_dir = 'North' # North = y+1, South = y-1, West = x-1, East = x+1
         self.directions = ['North', 'East', 'West', 'South']
-        self.speed = 0.8
+        self.speed = 0.5
         self.current_path = []
 
         self.view_distance = 6
@@ -633,10 +634,9 @@ class Patroller:
             dx, dy = tx - self.x, ty - self.y
             dist = math.sqrt(dx ** 2 + dy ** 2)
 
-            if dist < 0.1:
+            if dist < 0.05:
                 self.x, self.y = tx, ty
                 self.current_path.pop(0)
-
             else:
                 self.x += (dx/dist) * self.speed * deltatime
                 self.y += (dy/dist) * self.speed * deltatime
@@ -795,8 +795,7 @@ def main():
         patroller.update(delta_time)
         SPRITES[0] = patroller.as_sprite()
 
-        print(f'Patroller is {patroller.mode}. ({patroller.x:.2f}/{patroller.y:.2f})')
-        print(f'Player at {player_x:.2f}/{player_y:.2f}')
+        print(f'Patroller {patroller.x:.1f}/{patroller.y:.1f} Player {player_x:.1f}/{player_y:.1f}')
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
