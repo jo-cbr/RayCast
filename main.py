@@ -537,7 +537,7 @@ class Patroller:
         self.player_seen_pos = None
         self.target_pos = None
         self.cur_dir = 'North' # North = y+1, South = y-1, West = x-1, East = x+1
-        self.directions = ['North', 'East', 'South', 'West']
+        self.directions = ['North', 'East', 'West', 'South']
         self.speed = 0.8
         self.current_path = []
 
@@ -796,6 +796,7 @@ def main():
         SPRITES[0] = patroller.as_sprite()
 
         print(f'Patroller is {patroller.mode}. ({patroller.x:.2f}/{patroller.y:.2f})')
+        print(f'Player at {player_x:.2f}/{player_y:.2f}')
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
