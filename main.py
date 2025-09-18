@@ -34,19 +34,20 @@ def set_spawn_and_end():
 
     # Sucht Sackgassen am rechten Rand (Prüfung ob nur ein Weg hin Möglich)
     goal_points = [
-        (width-2, y) for y in range(height-2)
+        (y, width-2) for y in range(height-2)
         if (world[y][width-2] == 0) and
        ( (world[y-1][width-2] == 0 and world[y+1][width-2] != 0 and world[y][width-3] != 0) or
         (world[y+1][width-2] == 0 and world[y-1][width-2] != 0 and world[y][width-3] != 0) or
         (world[y+1][width-2] != 0 and world[y-1][width-2] != 0 and world[y][width-3] == 0))
     ]
-
-    # Punkte Links im Labyrinth
-    spawn_points = [(1, y) for y in range(height-1) if world[y][1] == 0]
+    # Notlösung falls keine Sackgassen am Rand
+    if not goal_points:
+        goal_points = [(y, width-2) for y in range(1, height-2) if world[y][width-2] == 0]
 
     p1 = random.choice(goal_points)
     world[p1] = 2
-    
+
+    spawn_points = [(y, 1) for y in range(height-1) if world[y][1] == 0]
     p2 = random.choice(spawn_points)
 
     return p1, p2
@@ -532,13 +533,17 @@ class Patroller:
     def __init__(self):
         self.world = world
         self.y, self.x = self.get_start_pos()
+        self.dx, self.dy = 0,0
         self.mode = 'Patrolling'
-        self.player_seen_pos = None
-        self.target_pos = None
-        self.cur_dir = 'North' # North = y+1, South = y-1, West = x-1, East = x+1
-        self.directions = ['North', 'East', 'West', 'South']
         self.speed = 0.5
         self.current_path = []
+
+        self.cur_dir = 'North' # North = y+1, South = y-1, West = x-1, East = x+1
+        self.directions = ['North', 'East', 'West', 'South']
+
+        self.player_seen_pos = None
+        self.target_pos = None
+        self.very_close_to_player = False
 
         self.view_distance = 6
         self.view_angle = math.pi/4
@@ -598,11 +603,13 @@ class Patroller:
 
         return True
 
-    def move_and_collide(self, dx, dy):
-        new_x = self.x + dx
-        new_y = self.y + dy
+    def move_and_collide(self, deltatime):
+        step_x = self.dx * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
+        step_y = self.dy * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
 
-        radius = 0.2
+        new_x = self.x + step_x
+        new_y = self.y + step_y
+        radius = 0.05
 
         cells_x = [
             (int(self.y - radius), int(new_x - radius)),
@@ -610,8 +617,10 @@ class Patroller:
             (int(self.y + radius), int(new_x - radius)),
             (int(self.y + radius), int(new_x + radius)),
         ]
-        if all(self.world[cy][cx] == 0 for cy, cx in cells_x):
+        if all(len(self.world) > cy >= 0 == self.world[cy][cx] and 0 <= cx < len(self.world[0]) for cy, cx in cells_x):
             self.x = new_x
+        else:
+            step_x = 0
 
         cells_y = [
             (int(new_y - radius), int(self.x - radius)),
@@ -619,8 +628,17 @@ class Patroller:
             (int(new_y + radius), int(self.x - radius)),
             (int(new_y + radius), int(self.x + radius)),
         ]
-        if all(self.world[cy][cx] == 0 for cy, cx in cells_y):
+        if all(len(self.world) > cy >= 0 == self.world[cy][cx] and 0 <= cx < len(self.world[0]) for cy, cx in cells_y):
             self.y = new_y
+        else:
+            step_y = 0
+
+        move_len = math.sqrt(step_x ** 2 + step_y ** 2)
+        if move_len > 1e-6:
+            self.dx = step_x / move_len
+            self.dy = step_y / move_len
+        else:
+            self.dx, self.dy = 0, 0
 
     def update(self, deltatime):
         if self.mode == 'Patrolling':
@@ -633,22 +651,57 @@ class Patroller:
                 self.player_seen_pos = (int(player_y), int(player_x))
 
         elif self.mode == 'Chasing':
-            self.current_path = a_star(self.world, (int(self.y), int(self.x)), self.player_seen_pos)
+            # Immer letzte Spieler Position suchen
+            # Pop weil erste Position immer die aktuelle ist -> keine Bewegung
+            path = a_star(self.world, (int(self.y), int(self.x)), self.player_seen_pos)
+            if not path:
+                return
+
+            if len(path) > 1:
+                path.pop(0)
+            self.current_path = path
+
+            if not self.current_path:
+                self.current_path = [(player_y, player_x)]
+                self.very_close_to_player = True
+
+        if not self.current_path:
+            return
 
         ty, tx = self.current_path[0]
-        # + 0.5 to center position
-        dx, dy = tx + 0.5 - self.x, ty + 0.5 - self.y
-        dist = math.sqrt(dx ** 2 + dy ** 2)
+
+        # vec_x, vec_y ist vektor zur ziel position, self.dx self.dy ist die bewegung in der aktuellen frame
+        if not self.very_close_to_player:
+            # + 0.5 to center position
+            vec_x, vec_y = tx + 0.5 - self.x, ty + 0.5 - self.y
+        else:
+            vec_x, vec_y = tx - self.x, ty - self.y
+
+        dist = math.sqrt(vec_x ** 2 + vec_y ** 2)
 
         if self.mode == 'Chasing' and dist > self.view_distance:
+            self.current_path = [self.get_target_pos()]
             self.mode = 'Patrolling'
 
         if dist < 0.05:
             self.x, self.y = tx+0.5, ty+0.5
             self.current_path.pop(0)
-        else:
-            self.x += (dx/dist) * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
-            self.y += (dy/dist) * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
+
+            if self.current_path:
+                ty, tx = self.current_path[0]
+                vec_x, vec_y = tx + 0.5 - self.x, ty + 0.5 - self.y
+                dist = math.sqrt(vec_x**2 + vec_y**2)
+            else:
+                self.dx = self.dy = dist = 0
+
+        if dist > 1e-6:
+            if dist > 1e-6:
+                self.dx = vec_x / dist
+                self.dy = vec_y / dist
+            else:
+                self.dx, self.dy = 0, 0
+
+            self.move_and_collide(deltatime)
 
     def as_sprite(self):
         return {'x': self.x, 'y': self.y, 'texture': self.texture}
@@ -781,6 +834,7 @@ def main():
         patroller.update(delta_time)
         SPRITES[0] = patroller.as_sprite()
 
+        print(patroller.mode)
         print(f'Patroller {patroller.x:.1f}/{patroller.y:.1f} Player {player_x:.1f}/{player_y:.1f}')
 
         if last_sprayed < spray_cooldown:
