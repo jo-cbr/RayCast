@@ -16,8 +16,8 @@ cur_size = 32
 MAX_DISTANCE = 32
 MAX_VIEW_DISTANCE = 8
 
-WIDTH, HEIGHT = 1920, 1080
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
+WIDTH, HEIGHT = 768, 432 # For Testing purposes
+screen = pygame.display.set_mode((WIDTH, HEIGHT))#, pygame.FULLSCREEN)
 center_y = HEIGHT // 2
 
 FOV = math.radians(60)
@@ -117,7 +117,7 @@ GLOWSTICK_TEXTURE = pygame.image.load('assets/glowstick.png').convert_alpha()
 
 #endregion
 column_cache = {}
-CACHE_MAX_SIZE = 2048
+CACHE_MAX_SIZE = 4096
 QUANTIZE_HEIGHT = 2
 
 RAY_STEP = 6
@@ -375,6 +375,7 @@ def cast_single_ray(i, half_fov, map_x, map_y, dir_x, dir_y):
 
 #region Player Controller Funcs
 exhausted_played = False
+ENERGY_FACTOR = 1
 def player_controller(delta_time):
     # Alle globalen vars die gebraucht werden
     global player_x, player_y, player_angle, player_spawn, \
@@ -385,7 +386,7 @@ def player_controller(delta_time):
     move_speed = 1
     strafe_speed = 0.75
     rot_speed = 30
-    energy_loss_factor = 25
+    energy_loss_factor = 12 * ENERGY_FACTOR
     energy_gain_factor = 5
 
     moving = False
@@ -581,7 +582,7 @@ def loading_screen(text):
 # Main Loop
 def main():
     global cam_pitch, player_view, PLAYING, GRID_HEIGHT, GRID_WIDTH, \
-        player_x, player_y, player_spawn, world, TIMER, SPRITES
+        player_x, player_y, player_spawn, world, TIMER, SPRITES, ENERGY_FACTOR
     mouse_visible = False
     mouse_grab = True
     pygame.mouse.set_visible(mouse_visible)
@@ -596,8 +597,6 @@ def main():
 
     spray_cooldown = 1.0
     last_sprayed = 1.0
-    spray_frame = 1
-    spray_surf = pygame.Surface((32, 32), pygame.SRCALPHA)
     
     # World Creation and Setup
     if not PLAYING:
@@ -619,7 +618,7 @@ def main():
             place_checkpoints(start_pos, end_pos)
 
         player_spawn = player_x, player_y = start_pos[0] + 0.5, start_pos[1] + 0.5
-
+        ENERGY_FACTOR = 128/cur_size
         PLAYING = True
 
     clock.tick(FPS)
