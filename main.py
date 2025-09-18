@@ -253,7 +253,7 @@ def draw_sprites():
 
         proj_wall_h = abs(int(HEIGHT / transform_y))
         wall_bottom_y = int(center_y + proj_wall_h//2 + cam_pitch + bob_offset_y)
-        draw_start_y = wall_bottom_y + 2*sprite_height
+        draw_start_y = wall_bottom_y - sprite_height
         
         draw_start_x = -sprite_width // 2 + sprite_screen_x
         if draw_start_x < -sprite_width: draw_start_x = 0
@@ -262,6 +262,7 @@ def draw_sprites():
         
         scaled_texture = pygame.transform.smoothscale(texture, (sprite_width, sprite_height))
         for stripe in range(draw_start_x, draw_end_x):
+            if stripe < 0: continue
             if transform_y < Z_BUFFER[stripe]:
                 tex_x = stripe - draw_start_x
                 column = scaled_texture.subsurface((tex_x, 0, 1, sprite_height))
@@ -527,6 +528,139 @@ def is_empty(x, y):
     return False
 #endregion
 
+#region Patrolling Enemy
+class Patroller:
+    def __init__(self):
+        self.world = world
+        self.y, self.x = self.get_start_pos()
+        self.mode = 'Patrolling'
+        self.player_seen_pos = None
+        self.target_pos = None
+        self.cur_dir = 'North' # North = y+1, South = y-1, West = x-1, East = x+1
+        self.directions = ['North', 'East', 'South', 'West']
+        self.speed = 0.8
+        self.current_path = []
+
+        self.view_distance = 6
+        self.view_angle = math.pi/4
+
+        #test surface
+        test_text = pygame.Surface((32, 64))
+        test_text.fill((255, 0, 0))
+        self.texture = test_text
+
+    def get_start_pos(self) -> tuple[int, int]:
+        height = width = len(self.world)-1
+        candidates = []
+        for y in range(height):
+            if self.world[y][width//2] == 0:
+                candidates.append((y, width//2))
+
+        spawn = random.choice(candidates)
+        return spawn[0]+0.5, spawn[1]+0.5
+
+    def get_forward_offset(self, direction):
+        if direction == 'North': return (1, 0)
+        if direction == 'South': return (-1, 0)
+        if direction == 'East': return (0, 1)
+        if direction == 'West': return (0, -1)
+
+    def get_target_pos(self):
+        dy, dx = self.get_forward_offset(self.cur_dir)
+        ty, tx = int(self.y + dy), int(self.x + dx)
+
+        # Bei Wand drehen
+        if self.world[ty][tx] != 0:
+            idx = (self.directions.index(self.cur_dir) + 1) % len(self.directions)
+            self.cur_dir = self.directions[idx]
+            return self.get_target_pos()
+        return ty + 0.5, tx + 0.5
+
+    def can_see_player(self):
+        dx = player_x - self.x
+        dy = player_y - self.y
+        dist = math.sqrt(dx ** 2 + dy ** 2)
+        if dist > self.view_distance:
+            return False
+
+        dir_map = {'North': (1,0), 'South': (-1,0), 'East': (0,1), 'West': (0,-1)}
+        dir_vector = dir_map[self.cur_dir]
+
+        angle = math.acos((dx*dir_vector[1] + dy*dir_vector[0]) / (dist+1e-6))
+        if angle > self.view_angle:
+            return False
+
+        steps = int(dist*2)
+        for i in range(1, steps):
+            sy = int(self.y + dy * (i/steps))
+            sx = int(self.x + dx * (i/steps))
+            if self.world[sy, sx] != 0:
+                return False
+
+        return True
+
+    def move_and_collide(self, dx, dy):
+        new_x = self.x + dx
+        new_y = self.y + dy
+
+        radius = 0.2
+
+        cells_x = [
+            (int(self.y - radius), int(new_x - radius)),
+            (int(self.y - radius), int(new_x + radius)),
+            (int(self.y + radius), int(new_x - radius)),
+            (int(self.y + radius), int(new_x + radius)),
+        ]
+        if all(self.world[cy][cx] == 0 for cy, cx in cells_x):
+            self.x = new_x
+
+        cells_y = [
+            (int(new_y - radius), int(self.x - radius)),
+            (int(new_y - radius), int(self.x + radius)),
+            (int(new_y + radius), int(self.x - radius)),
+            (int(new_y + radius), int(self.x + radius)),
+        ]
+        if all(self.world[cy][cx] == 0 for cy, cx in cells_y):
+            self.y = new_y
+
+    def update(self, deltatime):
+        if self.mode == 'Patrolling':
+            if not self.current_path:
+                self.target_pos = self.get_target_pos()
+                self.current_path = [self.target_pos]
+
+            ty, tx = self.current_path[0]
+            dx, dy = tx - self.x, ty - self.y
+            dist = math.sqrt(dx ** 2 + dy ** 2)
+
+            if dist < 0.1:
+                self.x, self.y = tx, ty
+                self.current_path.pop(0)
+
+            else:
+                self.x += (dx/dist) * self.speed * deltatime
+                self.y += (dy/dist) * self.speed * deltatime
+
+            if self.can_see_player():
+                self.mode = 'Chasing'
+                self.player_seen_pos = (player_y, player_x)
+
+        elif self.mode == 'Chasing':
+            dx, dy = player_x - self.x, player_y - self.y
+            dist = math.sqrt(dx ** 2 + dy ** 2)
+
+            if dist > self.view_distance * 1.5:
+                self.mode = 'Patrolling'
+                self.current_path.clear()
+
+            else:
+                self.x += (dx/dist) * self.speed * 1.5 * deltatime
+                self.y += (dy/dist) * self.speed * 1.5 * deltatime
+
+    def as_sprite(self):
+        return {'x': self.x, 'y': self.y, 'texture': self.texture}
+#endregion
+
 def handle_random_sounds():
     global random_sound_channel
     rare_sounds = [wind_sound, footsteps_behind, intense_sound, branch_cracking, humming, ghost_sound]
@@ -580,9 +714,11 @@ def loading_screen(text):
     pygame.display.update()
 #endregion
 # Main Loop
+patroller = None
 def main():
     global cam_pitch, player_view, PLAYING, GRID_HEIGHT, GRID_WIDTH, \
-        player_x, player_y, player_spawn, world, TIMER, SPRITES, ENERGY_FACTOR
+        player_x, player_y, player_spawn, world, TIMER, SPRITES, ENERGY_FACTOR,\
+        patroller
     mouse_visible = False
     mouse_grab = True
     pygame.mouse.set_visible(mouse_visible)
@@ -617,7 +753,11 @@ def main():
             loading_screen('Placing Checkpoints...')
             place_checkpoints(start_pos, end_pos)
 
+
         player_spawn = player_x, player_y = start_pos[0] + 0.5, start_pos[1] + 0.5
+        patroller = Patroller()
+        SPRITES.append({'x': patroller.x, 'y': patroller.y, 'texture': patroller.texture})
+
         ENERGY_FACTOR = 128/cur_size
         PLAYING = True
 
@@ -646,12 +786,16 @@ def main():
                         glowstick_tex = GLOWSTICK_TEXTURE.copy()
                         glowstick_tex.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
                         SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_tex})
-                        spray_frame=1
                         last_sprayed = 0
 
         handle_random_sounds()
         draw_scene()
         player_controller(delta_time)
+
+        patroller.update(delta_time)
+        SPRITES[0] = patroller.as_sprite()
+
+        print(f'Patroller is {patroller.mode}. ({patroller.x:.2f}/{patroller.y:.2f})')
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
