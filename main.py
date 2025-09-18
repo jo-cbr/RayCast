@@ -88,7 +88,12 @@ ghost_sound = pygame.mixer.Sound('assets/ghost_sound.mp3')
 branch_cracking = pygame.mixer.Sound('assets/cracking_sound.mp3')
 
 player_action_channel = pygame.mixer.Channel(3)
-spray_sound = pygame.mixer.Sound('assets/spray.mp3')
+
+def handle_random_sounds():
+    global random_sound_channel
+    rare_sounds = [wind_sound, footsteps_behind, intense_sound, branch_cracking, humming, ghost_sound]
+    if random.random() > 0.9999 and not random_sound_channel.get_busy():
+        random_sound_channel.play(random.choice(rare_sounds))
 
 #endregion
 PROJ_PLANE = (WIDTH / 2) / math.tan(FOV * 0.5)
@@ -105,13 +110,6 @@ GLOBAL_WALL_SCALE = 1
 
 VIGNETTE_SURF = pygame.image.load('assets/vignette.png').convert_alpha()
 VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size())
-
-SPRAY1 = pygame.image.load('assets/animations/spray_overlay1.png').convert_alpha()
-SPRAY2 = pygame.image.load('assets/animations/spray_overlay2.png').convert_alpha()
-SPRAY3 = pygame.image.load('assets/animations/spray_overlay3.png').convert_alpha()
-SPRAY4 = pygame.image.load('assets/animations/spray_overlay4.png').convert_alpha()
-SPRAY5 = pygame.image.load('assets/animations/spray_overlay5.png').convert_alpha()
-SPRAY_ANIMATION = [SPRAY1, SPRAY2, SPRAY3, SPRAY4, SPRAY5]
 
 GLOWSTICK_TEXTURE = pygame.image.load('assets/glowstick.png').convert_alpha()
 
@@ -660,13 +658,6 @@ class Patroller:
     def as_sprite(self):
         return {'x': self.x, 'y': self.y, 'texture': self.texture}
 #endregion
-
-def handle_random_sounds():
-    global random_sound_channel
-    rare_sounds = [wind_sound, footsteps_behind, intense_sound, branch_cracking, humming, ghost_sound]
-    if random.random() > 0.9999 and not random_sound_channel.get_busy():
-        random_sound_channel.play(random.choice(rare_sounds))
-
 
 #region Worldgeneration
 def place_checkpoints(start, end):
