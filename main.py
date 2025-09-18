@@ -573,7 +573,7 @@ class Patroller:
             idx = (self.directions.index(self.cur_dir) + 1) % len(self.directions)
             self.cur_dir = self.directions[idx]
             return self.get_target_pos()
-        return ty + 0.5, tx + 0.5
+        return ty, tx
 
     def can_see_player(self):
         dx = player_x - self.x
@@ -628,32 +628,27 @@ class Patroller:
                 self.target_pos = self.get_target_pos()
                 self.current_path = [self.target_pos]
 
-            ty, tx = self.current_path[0]
-            dx, dy = tx - self.x, ty - self.y
-            dist = math.sqrt(dx ** 2 + dy ** 2)
-
-            if dist < 0.05:
-                self.x, self.y = tx, ty
-                self.current_path.pop(0)
-            else:
-                self.x += (dx/dist) * self.speed * deltatime
-                self.y += (dy/dist) * self.speed * deltatime
-
             if self.can_see_player():
                 self.mode = 'Chasing'
-                self.player_seen_pos = (player_y, player_x)
+                self.player_seen_pos = (int(player_y), int(player_x))
 
         elif self.mode == 'Chasing':
-            dx, dy = player_x - self.x, player_y - self.y
-            dist = math.sqrt(dx ** 2 + dy ** 2)
+            self.current_path = a_star(self.world, (int(self.y), int(self.x)), self.player_seen_pos)
 
-            if dist > self.view_distance * 1.5:
-                self.mode = 'Patrolling'
-                self.current_path.clear()
+        ty, tx = self.current_path[0]
+        # + 0.5 to center position
+        dx, dy = tx + 0.5 - self.x, ty + 0.5 - self.y
+        dist = math.sqrt(dx ** 2 + dy ** 2)
 
-            else:
-                self.x += (dx/dist) * self.speed * 1.5 * deltatime
-                self.y += (dy/dist) * self.speed * 1.5 * deltatime
+        if self.mode == 'Chasing' and dist > self.view_distance:
+            self.mode = 'Patrolling'
+
+        if dist < 0.05:
+            self.x, self.y = tx, ty
+            self.current_path.pop(0)
+        else:
+            self.x += (dx/dist) * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
+            self.y += (dy/dist) * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
 
     def as_sprite(self):
         return {'x': self.x, 'y': self.y, 'texture': self.texture}
