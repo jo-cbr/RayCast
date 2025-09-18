@@ -644,7 +644,7 @@ class Patroller:
             self.mode = 'Patrolling'
 
         if dist < 0.05:
-            self.x, self.y = tx, ty
+            self.x, self.y = tx+0.5, ty+0.5
             self.current_path.pop(0)
         else:
             self.x += (dx/dist) * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
