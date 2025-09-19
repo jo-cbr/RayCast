@@ -212,7 +212,7 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
 
 SPRITES = []
 
-SCALE_FACTOR = 10
+SCALE_FACTOR = 5
 def draw_sprites():
     # Sprites nach Distanz sortieren
     if len(SPRITES) == 0:
@@ -251,7 +251,7 @@ def draw_sprites():
 
         proj_wall_h = abs(int(HEIGHT / transform_y))
         wall_bottom_y = int(center_y + proj_wall_h//2 + cam_pitch + bob_offset_y)
-        draw_start_y = wall_bottom_y - sprite_height//2
+        draw_start_y = wall_bottom_y - sprite_height
         
         draw_start_x = -sprite_width // 2 + sprite_screen_x
         if draw_start_x < -sprite_width: draw_start_x = 0
@@ -262,9 +262,10 @@ def draw_sprites():
             if stripe < 0 or stripe > WIDTH: continue
             if transform_y < Z_BUFFER[stripe]:
                 tex_x = min(int((stripe - draw_start_x) * texture_width / sprite_width), texture_width-2)
+                scaling_factor = max(sprite_width / texture_width, 6)
                 column = pygame.transform.scale(
                     texture.subsurface((tex_x, 0, 1, texture_height)),
-                    (6 , sprite_height)
+                    (scaling_factor , sprite_height)
                 )
                 screen.blit(column, (stripe, draw_start_y))
 
@@ -571,7 +572,7 @@ class Patroller:
         if direction == 'West': return (0, -1)
 
     def get_target_pos(self):
-        dy, dx = self.get_forward_offset(self.cur_dir)
+        dy, dx = self.get_forward_offset('West')
         ty, tx = int(self.y + dy), int(self.x + dx)
 
         # Bei Wand drehen
@@ -838,6 +839,13 @@ def main():
                         SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_tex})
                         last_sprayed = 0
 
+            if event.type == pygame.WINDOWFOCUSLOST:
+                menu()
+                mouse_visible = not mouse_visible
+                mouse_grab = not mouse_grab
+                pygame.mouse.set_visible(mouse_visible)
+                pygame.event.set_grab(mouse_grab)
+
         handle_random_sounds()
         draw_scene()
         player_controller(delta_time)
@@ -845,8 +853,7 @@ def main():
         patroller.update(delta_time)
         SPRITES[0] = patroller.as_sprite()
 
-        print(patroller.mode)
-        print(f'Patroller {patroller.x:.1f}/{patroller.y:.1f} Player {player_x:.1f}/{player_y:.1f}')
+        print(f'Patroller {patroller.x:.1f}/{patroller.y:.1f}')
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
