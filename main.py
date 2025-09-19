@@ -87,8 +87,13 @@ footsteps_behind = pygame.mixer.Sound('assets/footsteps_behind.mp3')
 humming = pygame.mixer.Sound('assets/humming.mp3')
 ghost_sound = pygame.mixer.Sound('assets/ghost_sound.mp3')
 branch_cracking = pygame.mixer.Sound('assets/cracking_sound.mp3')
+death_sound = pygame.mixer.Sound('assets/death_beep.mp3')
+death_sound.set_volume(0.5)
 
-player_action_channel = pygame.mixer.Channel(3)
+heartbeat_channel = pygame.mixer.Channel(3)
+heartbeat_slow = pygame.mixer.Sound('assets/heartbeat_slow.mp3')
+heartbeat_medium = pygame.mixer.Sound('assets/heartbeat_medium.mp3')
+heartbeat_fast = pygame.mixer.Sound('assets/heartbeat_fast.mp3')
 
 def handle_random_sounds():
     global random_sound_channel
@@ -111,7 +116,7 @@ WALL_TEXTURE_WIDTH, WALL_TEXTURE_HEIGHT = WALL_TEXTURE.get_size()
 VIGNETTE_SURF = pygame.image.load('assets/vignette.png').convert_alpha()
 VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size())
 
-GLOWSTICK_TEXTURE = pygame.image.load('assets/glowstick.png').convert_alpha()
+GLOWSTICK_TEXTURE = pygame.transform.scale_by(pygame.image.load('assets/glowstick.png').convert_alpha(), 16)
 
 #endregion
 column_cache = {}
@@ -211,7 +216,6 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
 
 SPRITES = []
 
-SCALE_FACTOR = 5
 def draw_sprites():
     # Sprites nach Distanz sortieren
     if len(SPRITES) == 0:
@@ -647,6 +651,21 @@ class Patroller:
         else:
             self.dx, self.dy = 0, 0
 
+    def heartbeat_sound(self, distance_to_player, chasing=False):
+        if 5 < distance_to_player < 7.5:
+            sound = heartbeat_slow
+        elif distance_to_player <= 5 and not chasing:
+            sound = heartbeat_medium
+        elif chasing:
+            sound = heartbeat_fast
+        else:
+            sound = None
+        if sound is None:
+            heartbeat_channel.fadeout(100)
+
+        elif heartbeat_channel.get_queue() != sound:
+            heartbeat_channel.queue(sound)
+
     def update(self, deltatime):
         global player_x, player_y
         distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
@@ -664,7 +683,7 @@ class Patroller:
                 self.current_path = [self.target_pos]
 
             # Spieler kann gehört werden wenn zu nah, len statt distance sodass es nicht durch wände geht
-            if self.can_see_player() or (len(path_to_player) < 3 and footstep_channel.get_busy()):
+            if self.can_see_player() or (len(path_to_player) < 5 and footstep_channel.get_busy()):
                 self.mode = 'Chasing'
                 self.player_seen_pos = (int(player_y), int(player_x))
                 self.current_path = a_star(self.world, (int(self.y), int(self.x)), self.player_seen_pos)
@@ -683,14 +702,21 @@ class Patroller:
             if self.can_see_player():
                 self.current_path = path_to_player
             elif distance_to_player < 2:
-                self.current_path = [(int(player_y), int(player_x))]
-            elif distance_to_player < 3:
+                close_to_player = True
+                self.current_path = [(player_y, player_x)]
+            elif distance_to_player < 4:
                 self.current_path = path_to_player[0:-1]
             else:
                 self.current_path = [self.get_target_pos()]
 
+        if self.current_path is None or len(self.current_path) == 0:
+            return
+
         ty, tx = self.current_path[0]
-        vec_x, vec_y = tx + 0.5 - self.x, ty + 0.5 - self.y
+        if close_to_player:
+            vec_x, vec_y = tx - self.x, ty - self.y
+        else:
+            vec_x, vec_y = tx + 0.5 - self.x, ty + 0.5 - self.y
 
         dist = math.sqrt(vec_x ** 2 + vec_y ** 2)
 
@@ -727,6 +753,7 @@ class Patroller:
             self.cur_dir = 'North' if vec_y > 0 else 'South'
 
         self.move_and_collide(deltatime)
+        self.heartbeat_sound(distance_to_player, self.mode=='Chasing')
 
     def get_rotation_to_player(self):
         dx_to_player = player_x - self.x
@@ -746,16 +773,16 @@ class Patroller:
 
         #front
         if -math.pi/4 <= angle <= math.pi/4:
-            self.texture.fill((255, 0, 0))
+            self.texture = self.front
         #left
         elif math.pi/4 < angle < 3*math.pi/4:
-            self.texture.fill((0, 255, 0))
+            self.texture = self.left
         # right
         elif -3*math.pi/4 < angle < -math.pi/4:
-            self.texture.fill((0, 0, 255))
+            self.texture = self.right
         # back
         else:
-            self.texture.fill((0, 255, 255))
+            self.texture = self.back
 
         return {'x': self.x, 'y': self.y, 'texture': self.texture}
 #endregion
@@ -850,6 +877,7 @@ def main():
 
         player_spawn = player_x, player_y = start_pos[0] + 0.5, start_pos[1] + 0.5
         patroller = Patroller()
+        SPRITES = []
         SPRITES.append({'x': patroller.x, 'y': patroller.y, 'texture': patroller.texture})
 
         ENERGY_FACTOR = 128/cur_size
@@ -919,6 +947,8 @@ def respawn_func():
 
 def menu():
     global WIDTH, HEIGHT
+    heartbeat_channel.stop()
+
     menu_color = (192, 192, 192)
     color = (128, 128, 128)
     hover_color = (96, 96, 96)

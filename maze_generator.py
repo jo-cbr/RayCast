@@ -8,7 +8,7 @@ def a_star(maze, startpos, endpos):
     g_score = {startpos: 0}
 
     def evaluate_node(g, pos):
-        # Manhatten Distanz (Keine Diagonalen Bewegungen
+        # Manhatten Distanz (Keine Diagonalen Bewegungen)
         dx, dy = (abs(endpos[0] - pos[0]) , abs(endpos[1] - pos[1]))
         h = dx + dy
         return g + h
