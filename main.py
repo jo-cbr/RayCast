@@ -431,7 +431,9 @@ def player_controller(delta_time):
 
     keys = pygame.key.get_pressed()
     if keys[pygame.K_w]:
-        if keys[pygame.K_LCTRL] and not exhausted_played:
+        if keys[pygame.K_LSHIFT]:
+            forward = 0.75
+        elif keys[pygame.K_LCTRL] and not exhausted_played:
             if player_energy > 0:
                 forward = 2
                 player_energy -= energy_loss_factor * delta_time
@@ -490,7 +492,7 @@ def player_controller(delta_time):
             if q != footstep_sprint:
                 footstep_channel.stop()
             footstep_channel.play(footstep_sprint)
-        else:
+        elif forward >= 1:
             if q != footstep_reg:
                 footstep_channel.stop()
             footstep_channel.play(footstep_reg)
@@ -641,12 +643,14 @@ class Patroller:
 
     def update(self, deltatime):
         distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
+        path_to_player = a_star(self.world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
         if self.mode == 'Patrolling':
             if not self.current_path:
                 self.target_pos = self.get_target_pos()
                 self.current_path = [self.target_pos]
 
-            if self.can_see_player() or (distance_to_player < 3 and footstep_channel.get_busy()):
+            # Spieler kann gehört werden wenn zu nah, len statt distance sodass es nicht durch wände geht
+            if self.can_see_player() or (len(path_to_player) < 3 and footstep_channel.get_busy()):
                 self.mode = 'Chasing'
                 self.player_seen_pos = (int(player_y), int(player_x))
                 self.current_path = a_star(self.world, (int(self.y), int(self.x)), self.player_seen_pos)
@@ -654,10 +658,10 @@ class Patroller:
 
         if self.mode == 'Chasing':
             self.player_seen_pos = (int(player_y), int(player_x))
-            path_to_player = a_star(self.world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
             if len(path_to_player) > 1:
                 path_to_player.pop(0)
 
+            # Logik für verschiedene Szenarien
             if distance_to_player > self.view_distance or (distance_to_player > self.view_distance/2 and not self.can_see_player()):
                 self.current_path = [self.get_target_pos()]
                 self.mode = 'Patrolling'
