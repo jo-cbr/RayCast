@@ -271,9 +271,6 @@ def draw_sprites():
                 )
                 screen.blit(column, (stripe, draw_start_y))
 
-        pygame.draw.rect(screen, (255, 255, 255), (draw_start_x, draw_start_y, sprite_width, sprite_height), 1)
-        pygame.draw.line(screen, (255, 255, 255), (0, wall_bottom_y), (WIDTH, wall_bottom_y), 1)
-
 #endregion
 
 #region Ray Cast Funcs
@@ -392,7 +389,7 @@ def player_controller(delta_time):
     next_x, next_y = player_x, player_y
     move_speed = 1
     strafe_speed = 0.75
-    rot_speed = 30
+    rot_speed = 45
     energy_loss_factor = 12 * ENERGY_FACTOR
     energy_gain_factor = 5
 
@@ -491,7 +488,6 @@ def player_controller(delta_time):
     bob_offset_x = math.cos(walk_cycle * 0.5 * view_bob_frequency) * view_bob_amplitude * forward
     bob_offset_y = view_bob_frequency * math.sin(walk_cycle * view_bob_frequency) * view_bob_amplitude * forward
 
-    # Handle footsteps (probably very fucked and inefficient but who cares it doesnt drop frames frfr)
     if moving and not footstep_channel.get_busy():
         q = footstep_channel.get_queue()
         if forward == 1.5:
@@ -543,11 +539,11 @@ class Patroller:
         self.y, self.x = self.get_start_pos()
         self.dx, self.dy = 0,0
         self.mode = 'Patrolling'
-        self.speed = 0.5
+        self.speed = 0.75
         self.current_path = []
 
-        self.cur_dir = 'North' # North = y+1, South = y-1, West = x-1, East = x+1
-        self.directions = ['North', 'West', 'South', 'East']
+        self.cur_dir = 'North'
+        self.directions = ['West', 'East', 'South', 'North']
 
         self.player_seen_pos = None
         self.target_pos = None
