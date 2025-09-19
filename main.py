@@ -552,7 +552,11 @@ class Patroller:
         self.view_angle = math.pi/4
 
         #test surface
-        test_text = pygame.Surface((32, 64))
+        test_text = pygame.Surface((512, 1024))
+        self.front = pygame.transform.scale_by(pygame.image.load('assets/eyeball.png').convert_alpha(), 20)
+        self.right = pygame.transform.scale_by(pygame.image.load('assets/eyeball_side.png').convert_alpha(), 20)
+        self.left = pygame.transform.flip(pygame.transform.scale_by(pygame.image.load('assets/eyeball_side.png').convert_alpha(), 20), True, False)
+        self.back = pygame.transform.scale_by(pygame.image.load('assets/eyeball_back.png').convert_alpha(), 20)
         self.texture = test_text
 
     def get_start_pos(self) -> tuple[int, int]:
