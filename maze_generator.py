@@ -49,7 +49,7 @@ def a_star(maze, startpos, endpos):
                 if neighbor not in open_nodes:
                     open_nodes.append(neighbor)
 
-    return None
+    return [startpos]
 
 
 def get_a_star_neighbors(rc):

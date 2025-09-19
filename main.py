@@ -277,6 +277,7 @@ def draw_sprites():
                 )
                 screen.blit(column, (stripe, draw_start_y))
 
+        pygame.draw.rect(screen, (255,0,0), (draw_start_x, draw_start_y, sprite_width, sprite_height), width = 1)
 #endregion
 
 #region Ray Cast Funcs
@@ -677,8 +678,12 @@ class Patroller:
         else:
             sound = None
 
-        elif heartbeat_channel.get_queue() != sound:
-            heartbeat_channel.queue(sound)
+        if sound is not None:
+            if heartbeat_channel.get_sound() != sound:
+                heartbeat_channel.fadeout(50)
+            if not heartbeat_channel.get_busy():
+                heartbeat_channel.play(sound)
+            
 
     def update(self, deltatime):
         global player_x, player_y
