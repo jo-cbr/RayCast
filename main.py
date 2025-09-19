@@ -52,7 +52,7 @@ def set_spawn_and_end():
 
     return p1, p2
 
-_, player_spawn = set_spawn_and_end()
+player_spawn, _ = set_spawn_and_end()
 player_y, player_x = player_spawn
 
 player_energy = 100
@@ -243,6 +243,8 @@ def draw_sprites():
         transform_x = inv_det * (dir_y * sprite_x - dir_x * sprite_y)
         transform_y = inv_det * (-plane_y * sprite_x + plane_x * sprite_y)
         if transform_y < 0.1:
+            continue
+        if transform_y > MAX_DISTANCE:
             continue
 
         sprite_screen_x = int((WIDTH/2) * (1 + transform_x / transform_y))
@@ -539,18 +541,16 @@ def is_empty(x, y):
 #region Patrolling Enemy
 class Patroller:
     def __init__(self):
-        self.world = world
         self.y, self.x = self.get_start_pos()
         self.dx, self.dy = 0,0
         self.mode = 'Patrolling'
         self.speed = 0.75
-        self.current_path = []
 
+        self.current_path = []
         self.cur_dir = 'North'
-        self.directions = ['West', 'East', 'South', 'North']
+        self.directions = ['North', 'West', 'South', 'East']
 
         self.player_seen_pos = None
-        self.target_pos = None
 
         self.view_distance = 6
         self.view_angle = math.pi/4
@@ -564,16 +564,16 @@ class Patroller:
         self.texture = test_text
 
     def get_start_pos(self) -> tuple[int, int]:
-        height = width = len(self.world)-1
-        candidates = []
-        for y in range(height):
-            if self.world[y][width//2] == 0:
-                candidates.append((y, width-2))
+        height = width = len(world)-1
+        spawns = []
+        for y in range(height-1):
+            if world[y][width-2] == 0:
+                spawns.append((y, width-1))
 
-        spawn = random.choice(candidates)
+        spawn = random.choice(spawns)
         return spawn[0]+0.5, spawn[1]+0.5
 
-    def get_forward_offset(self, direction):
+    def get_direction_vector(self, direction):
         if direction == 'North': return (1, 0)
         if direction == 'South': return (-1, 0)
         if direction == 'East': return (0, 1)
@@ -581,15 +581,31 @@ class Patroller:
         else: return (0,0)
 
     def get_target_pos(self):
-        dy, dx = self.get_forward_offset(self.cur_dir)
-        ty, tx = int(self.y + dy), int(self.x + dx)
+        idx = self.directions.index(self.cur_dir)
+        left_dir = self.directions[(idx + 1) % 4]
+        dy, dx = self.get_direction_vector(left_dir)
+        ty, tx = int(self.y) + dy, int(self.x) + dx
 
-        # Bei Wand drehen
-        if self.world[ty][tx] != 0:
-            idx = (self.directions.index(self.cur_dir) + 1) % len(self.directions)
-            self.cur_dir = self.directions[idx]
-            return self.get_target_pos()
-        return ty, tx
+        if world[ty, tx] == 0:
+            return [(ty, tx)]
+        
+        dy, dx = self.get_direction_vector(self.cur_dir)
+        ty, tx = int(self.y) + dy, int(self.x) + dx
+        if world[ty, tx] == 0:
+            return [(ty, tx)]
+        
+        right_dir = self.directions[(idx + 3) % 4]
+        dy, dx = self.get_direction_vector(right_dir)
+        ty, tx = int(self.y) + dy, int(self.x) + dx
+        if world[ty, tx] == 0:
+            return [(ty, tx)]
+        
+        back_dir = self.directions[(idx + 2) % 4]
+        dy, dx = self.get_direction_vector(back_dir)
+        ty, tx = int(self.y) + dy, int(self.x) + dx
+        if world[ty, tx] == 0:
+            return [(ty, tx)]
+
 
     def can_see_player(self):
         dx = player_x - self.x
@@ -609,7 +625,7 @@ class Patroller:
         for i in range(1, steps):
             sy = int(self.y + dy * (i/steps))
             sx = int(self.x + dx * (i/steps))
-            if self.world[sy, sx] != 0:
+            if world[sy, sx] != 0:
                 return False
 
         return True
@@ -628,7 +644,7 @@ class Patroller:
             (int(self.y + radius), int(new_x - radius)),
             (int(self.y + radius), int(new_x + radius)),
         ]
-        if all(0 <= cy < len(self.world) and 0 <= cx < len(self.world[0]) and self.world[cy][cx] == 0 for cy, cx in cells_x):
+        if all(0 <= cy < len(world) and 0 <= cx < len(world[0]) and world[cy][cx] == 0 for cy, cx in cells_x):
             self.x = new_x
         else:
             step_x = 0
@@ -639,7 +655,7 @@ class Patroller:
             (int(new_y + radius), int(self.x - radius)),
             (int(new_y + radius), int(self.x + radius)),
         ]
-        if all(len(self.world) > cy >= 0 == self.world[cy][cx] and 0 <= cx < len(self.world[0]) for cy, cx in cells_y):
+        if all(len(world) > cy >= 0 == world[cy][cx] and 0 <= cx < len(world[0]) for cy, cx in cells_y):
             self.y = new_y
         else:
             step_y = 0
@@ -660,8 +676,6 @@ class Patroller:
             sound = heartbeat_fast
         else:
             sound = None
-        if sound is None:
-            heartbeat_channel.fadeout(100)
 
         elif heartbeat_channel.get_queue() != sound:
             heartbeat_channel.queue(sound)
@@ -669,24 +683,31 @@ class Patroller:
     def update(self, deltatime):
         global player_x, player_y
         distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
+        if distance_to_player < 16:
+            path_to_player = a_star(world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
+        else:
+            path_to_player = []
         close_to_player = False
+
+        # Kill Player
         if distance_to_player < 0.3:
             random_sound_channel.play(death_sound)
             self.y, self.x = self.get_start_pos()
             player_x, player_y = player_spawn
-        path_to_player = a_star(self.world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
-        if not path_to_player:
+
+        # Fallback
+        if path_to_player is None:
             return
+        
         if self.mode == 'Patrolling':
             if not self.current_path:
-                self.target_pos = self.get_target_pos()
-                self.current_path = [self.target_pos]
+                self.current_path = self.get_target_pos()
 
             # Spieler kann gehört werden wenn zu nah, len statt distance sodass es nicht durch wände geht
             if self.can_see_player() or (len(path_to_player) < 5 and footstep_channel.get_busy()):
                 self.mode = 'Chasing'
                 self.player_seen_pos = (int(player_y), int(player_x))
-                self.current_path = a_star(self.world, (int(self.y), int(self.x)), self.player_seen_pos)
+                self.current_path = a_star(world, (int(self.y), int(self.x)), self.player_seen_pos)
                 self.view_angle = math.pi/3
 
         if self.mode == 'Chasing':
@@ -696,18 +717,20 @@ class Patroller:
 
             # Logik für verschiedene Szenarien
             if distance_to_player > self.view_distance or (distance_to_player > self.view_distance/2 and not self.can_see_player()):
-                self.current_path = [self.get_target_pos()]
                 self.mode = 'Patrolling'
                 self.view_angle = math.pi/4
             if self.can_see_player():
-                self.current_path = path_to_player
+                if distance_to_player < 2:
+                    close_to_player = True
+                    self.current_path = [(player_y, player_x)]
+                else:
+                    self.current_path = path_to_player
             elif distance_to_player < 2:
-                close_to_player = True
-                self.current_path = [(player_y, player_x)]
-            elif distance_to_player < 4:
+                self.current_path = path_to_player
+            elif 2 <= distance_to_player < 4:
                 self.current_path = path_to_player[0:-1]
             else:
-                self.current_path = [self.get_target_pos()]
+                self.current_path = self.get_target_pos()
 
         if self.current_path is None or len(self.current_path) == 0:
             return
@@ -723,22 +746,6 @@ class Patroller:
         if dist < 0.05:
             self.x, self.y = tx+0.5, ty+0.5
             self.current_path.pop(0)
-
-            if self.current_path:
-                ty, tx = self.current_path[0]
-                vec_x, vec_y = tx + 0.5 - self.x, ty + 0.5 - self.y
-                dist = math.sqrt(vec_x**2 + vec_y**2)
-            else:
-                if self.mode == 'Chasing':
-                    dist = math.sqrt((int(player_x)+0.5-self.x)**2 + (int(player_y)+0.5-self.y)**2)
-                    if self.can_see_player() or dist < 2:
-                        self.player_seen_pos = (int(player_y), int(player_x))
-                        ty, tx = self.player_seen_pos
-                        vec_x, vec_y = tx + 0.5 - self.x, ty + 0.5 - self.y
-                    else:
-                        self.current_path = [self.get_target_pos()]
-                else:
-                    self.current_path = [self.get_target_pos()]
 
         if dist > 1e-6:
             self.dx = vec_x / dist
