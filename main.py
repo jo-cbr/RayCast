@@ -16,8 +16,8 @@ cur_size = 32
 MAX_DISTANCE = 32
 MAX_VIEW_DISTANCE = 8
 
-WIDTH, HEIGHT = 768, 432 # For Testing purposes
-screen = pygame.display.set_mode((WIDTH, HEIGHT))#, pygame.FULLSCREEN)
+WIDTH, HEIGHT = 1440, 720
+screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=True)
 center_y = HEIGHT // 2
 
 FOV = math.radians(60)
@@ -245,12 +245,15 @@ def draw_sprites():
         if not (0 <= sprite_screen_x < WIDTH):
             continue
 
-        sprite_height = abs(int(texture_height / transform_y * SCALE_FACTOR))
-        sprite_width = abs(int(texture_width / transform_y * SCALE_FACTOR))
+        proj_wall_h = int((1.0 / transform_y) * PROJ_PLANE)
 
-        proj_wall_h = abs(int(HEIGHT / transform_y))
+        sprite_height = abs(int(texture_height / transform_y))
+        sprite_width = abs(int(texture_width / transform_y))
+        
         wall_bottom_y = int(center_y + proj_wall_h//2 + cam_pitch + bob_offset_y)
         draw_start_y = wall_bottom_y - sprite_height
+        if wall_bottom_y - sprite_height > HEIGHT:
+            continue
         
         draw_start_x = -sprite_width // 2 + sprite_screen_x
         if draw_start_x < -sprite_width: draw_start_x = 0
