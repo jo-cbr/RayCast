@@ -554,7 +554,6 @@ class Patroller:
 
         #test surface
         test_text = pygame.Surface((32, 64))
-        test_text.fill((255, 0, 0))
         self.texture = test_text
 
     def get_start_pos(self) -> tuple[int, int]:
@@ -574,7 +573,7 @@ class Patroller:
         if direction == 'West': return (0, -1)
 
     def get_target_pos(self):
-        dy, dx = self.get_forward_offset('West')
+        dy, dx = self.get_forward_offset(self.cur_dir)
         ty, tx = int(self.y + dy), int(self.x + dx)
 
         # Bei Wand drehen
