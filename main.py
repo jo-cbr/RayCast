@@ -564,7 +564,7 @@ class Patroller:
         candidates = []
         for y in range(height):
             if self.world[y][width//2] == 0:
-                candidates.append((y, width//2))
+                candidates.append((y, width-2))
 
         spawn = random.choice(candidates)
         return spawn[0]+0.5, spawn[1]+0.5
@@ -574,6 +574,7 @@ class Patroller:
         if direction == 'South': return (-1, 0)
         if direction == 'East': return (0, 1)
         if direction == 'West': return (0, -1)
+        else: return (0,0)
 
     def get_target_pos(self):
         dy, dx = self.get_forward_offset(self.cur_dir)
@@ -647,8 +648,16 @@ class Patroller:
             self.dx, self.dy = 0, 0
 
     def update(self, deltatime):
+        global player_x, player_y
         distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
+        close_to_player = False
+        if distance_to_player < 0.3:
+            random_sound_channel.play(death_sound)
+            self.y, self.x = self.get_start_pos()
+            player_x, player_y = player_spawn
         path_to_player = a_star(self.world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
+        if not path_to_player:
+            return
         if self.mode == 'Patrolling':
             if not self.current_path:
                 self.target_pos = self.get_target_pos()
