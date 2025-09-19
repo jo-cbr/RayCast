@@ -107,7 +107,6 @@ CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/checkpoint_wall.png')
 SAVED_CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/saved_checkpoint_wall.png')
 
 WALL_TEXTURE_WIDTH, WALL_TEXTURE_HEIGHT = WALL_TEXTURE.get_size()
-GLOBAL_WALL_SCALE = 1
 
 VIGNETTE_SURF = pygame.image.load('assets/vignette.png').convert_alpha()
 VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size())
@@ -269,6 +268,9 @@ def draw_sprites():
                 )
                 screen.blit(column, (stripe, draw_start_y))
 
+        pygame.draw.rect(screen, (255, 255, 255), (draw_start_x, draw_start_y, sprite_width, sprite_height), 1)
+        pygame.draw.line(screen, (255, 255, 255), (0, wall_bottom_y), (WIDTH, wall_bottom_y), 1)
+
 #endregion
 
 #region Ray Cast Funcs
@@ -369,7 +371,7 @@ def cast_single_ray(i, half_fov, map_x, map_y, dir_x, dir_y):
         text_x = (WALL_TEXTURE_WIDTH - text_x - 1)
 
     wall_pos = (map_y, map_x)
-    wall_height = int((1.0 / perp_distance) * PROJ_PLANE * GLOBAL_WALL_SCALE)
+    wall_height = int((1.0 / perp_distance) * PROJ_PLANE)
     Z_BUFFER[i] = raw_dist
 
     return wall_height, i, perp_distance, side, grid_value, text_x, wall_pos
@@ -542,7 +544,7 @@ class Patroller:
         self.current_path = []
 
         self.cur_dir = 'North' # North = y+1, South = y-1, West = x-1, East = x+1
-        self.directions = ['North', 'East', 'South', 'West']
+        self.directions = ['North', 'West', 'South', 'East']
 
         self.player_seen_pos = None
         self.target_pos = None
@@ -715,7 +717,35 @@ class Patroller:
 
         self.move_and_collide(deltatime)
 
+    def get_rotation_to_player(self):
+        dx_to_player = player_x - self.x
+        dy_to_player = player_y - self.y
+
+        vector_to_player = (dx_to_player, dy_to_player)
+        direction_vector = (self.dx, self.dy)
+
+        dot = direction_vector[0]*vector_to_player[0] + direction_vector[1]*vector_to_player[1]
+        cross = direction_vector[0]*vector_to_player[1] - direction_vector[1]*vector_to_player[0]
+
+        angle = math.atan2(cross, dot)
+        return angle
+
     def as_sprite(self):
+        angle = self.get_rotation_to_player()
+
+        #front
+        if -math.pi/4 <= angle <= math.pi/4:
+            self.texture.fill((255, 0, 0))
+        #left
+        elif math.pi/4 < angle < 3*math.pi/4:
+            self.texture.fill((0, 255, 0))
+        # right
+        elif -3*math.pi/4 < angle < -math.pi/4:
+            self.texture.fill((0, 0, 255))
+        # back
+        else:
+            self.texture.fill((0, 255, 255))
+
         return {'x': self.x, 'y': self.y, 'texture': self.texture}
 #endregion
 
@@ -747,6 +777,7 @@ def place_checkpoints(start, end):
         cur_best = min(candidates, key=lambda p: abs(p[0]-mid_y) + abs(p[1]-mid_x))
 
         world[cur_best] = 4
+
 def create_world():
     global world, player_y, player_x, GRID_HEIGHT, GRID_WIDTH, cur_size
     cur_size += 16
@@ -754,6 +785,7 @@ def create_world():
     cur_size = max(cur_size, 16)
 
     return cur_size
+
 def loading_screen(text):
     screen.fill((0, 0, 0))
     loading_font = pygame.font.SysFont('Garamond', 32)
@@ -852,8 +884,6 @@ def main():
 
         patroller.update(delta_time)
         SPRITES[0] = patroller.as_sprite()
-
-        print(f'Patroller {patroller.x:.1f}/{patroller.y:.1f}')
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
