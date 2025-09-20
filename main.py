@@ -109,13 +109,14 @@ PROJ_PLANE = (WIDTH / 2) / math.tan(FOV * 0.5)
 BG_IMAGE = pygame.image.load('assets/main_background.png').convert()
 
 WALL_TEXTURE = pygame.image.load('assets/bushwall.png').convert()
-CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/checkpoint_wall.png')
-SAVED_CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/saved_checkpoint_wall.png')
+CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/checkpoint_wall.png').convert()
+SAVED_CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/saved_checkpoint_wall.png').convert()
+GOAL_WALL_TEXTURE = pygame.image.load('assets/goal_wall.png').convert()
 
 WALL_TEXTURE_WIDTH, WALL_TEXTURE_HEIGHT = WALL_TEXTURE.get_size()
 
 VIGNETTE_SURF = pygame.image.load('assets/vignette.png').convert_alpha()
-VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size())
+VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size()).convert()
 
 GLOWSTICK_TEXTURE = pygame.transform.scale_by(pygame.image.load('assets/glowstick.png').convert_alpha(), 16)
 
@@ -124,7 +125,7 @@ column_cache = {}
 CACHE_MAX_SIZE = 4096
 QUANTIZE_HEIGHT = 4
 
-RAY_STEP = 5
+RAY_STEP = 8
 
 BRIGHTNESS_FALLOFF = 2
 #region Draw Funcs
@@ -157,7 +158,7 @@ def draw_timer():
 def draw_ray_data(ray_data):
     textures = {
         1: WALL_TEXTURE,
-        2: WALL_TEXTURE,
+        2: GOAL_WALL_TEXTURE,
         #3: MARKED_WALL_TEXTURE,
         4: CHECKPOINT_WALL_TEXTURE,
         5: SAVED_CHECKPOINT_WALL_TEXTURE,
@@ -167,7 +168,7 @@ def draw_ray_data(ray_data):
     for ray in ray_data:
         wall_height, screen_x, distance, side, grid_value, text_x, wall_pos = ray
         texture = textures[grid_value]
-        result = draw_ray(wall_height, screen_x, distance, side, grid_value, text_x, texture)
+        result = draw_ray(int(wall_height), screen_x, distance, side, grid_value, text_x, texture)
         if result:
             ray_blits.append(result)
 
@@ -185,19 +186,20 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
     if distance >= MAX_DISTANCE:
         return
 
-    half_h = wall_height // 2
+
+    target_height = min(max(1, wall_height), 3*HEIGHT)
+    target_height = (target_height // QUANTIZE_HEIGHT) * QUANTIZE_HEIGHT
+    
+    half_h = target_height // 2
 
     top_y = int(center_y - half_h + bob_offset_y + cam_pitch)
-    bottom_y = int(center_y + half_h + bob_offset_y + cam_pitch)
 
-    texture_height = texture.get_height()
 
-    target_height = min(max(1, bottom_y - top_y), 10*HEIGHT)
-    target_height = (target_height // QUANTIZE_HEIGHT) * QUANTIZE_HEIGHT
     cache_key = (texture_x, target_height, grid_value)
     col_surf = column_cache.get(cache_key)
 
     if col_surf is None:
+        texture_height = texture.get_height()
         tx = max(0, min(texture.get_width() - 1, texture_x))
         tex_col = texture.subsurface((tx, 0, 1, texture_height))
         col_surf = pygame.transform.scale(tex_col, (RAY_STEP, target_height))
@@ -215,12 +217,10 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
 
     col_surf_final = col_surf.copy()
 
-    sc = 128 * brightness
+    sc = 128 * brightness + (10 if side else 0)
     shadow_color = (sc, sc, sc)
 
     # Legt finales "Schatten Layer" über Surface
-    if grid_value == 2:
-        col_surf_final.fill((64, 0, 0), special_flags=pygame.BLEND_RGB_MULT)
     col_surf_final.fill(shadow_color, special_flags=pygame.BLEND_SUB)
 
     col_blit = (col_surf_final, (final_x, top_y))
