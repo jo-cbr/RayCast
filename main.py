@@ -217,7 +217,7 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
         return
 
 
-    target_height = min(max(1, wall_height), 3*HEIGHT)
+    target_height = min(max(1, wall_height), HEIGHT*5)
     target_height = (target_height // QUANTIZE_HEIGHT) * QUANTIZE_HEIGHT
     
     half_h = target_height // 2
@@ -278,11 +278,11 @@ def draw_sprites():
         if transform_y < 0.1:
             continue
         sprite_screen_x = int((WIDTH/2) * (1 + transform_x / transform_y))
-        if not (0 <= sprite_screen_x < WIDTH):
+        if not (-texture_width <= sprite_screen_x < WIDTH):
             continue
 
         proj_wall_h = int((1.0 / transform_y) * PROJ_PLANE)
-        if proj_wall_h > HEIGHT*10:
+        if proj_wall_h > HEIGHT*5:
             continue
 
         sprite_height = abs(int(texture_height / transform_y))
@@ -343,14 +343,8 @@ def cast_rays():
 def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
     global Z_BUFFER
     # Strecke pro Spalte
-    if dir_x == 0:
-        delta_distance_x = float("inf")
-    else:
-        delta_distance_x =  abs( 1 / dir_x)
-    if dir_y == 0:
-        delta_distance_y = float("inf")
-    else:
-        delta_distance_y = abs(1 / dir_y)
+    delta_distance_x = abs(1 / dir_x) if dir_x != 0 else 1e30
+    delta_distance_y = abs(1 / dir_y) if dir_y != 0 else 1e30
 
     side = 0
 
@@ -390,6 +384,11 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
             map_y += step_y
             side = 0
             raw_dist = (side_dist_x - delta_distance_x + side_dist_y - delta_distance_y) / 2
+
+
+        if map_x < 0 or map_y < 0 or map_x >= GRID_WIDTH or map_y >= GRID_WIDTH:
+            raw_dist = min(raw_dist, MAX_DISTANCE)
+            break
 
         grid_value = world[map_y, map_x]
         if 0 <= map_x < GRID_WIDTH and 0 <= map_y < GRID_HEIGHT:
@@ -785,13 +784,13 @@ class Patroller:
         if self.mode == 'Patrolling':
             if not self.current_path:
                 self.current_path = self.get_target_pos()
-
-            # Spieler kann gehört werden wenn zu nah, len statt distance sodass es nicht durch wände geht
-            if self.can_see_player() or (len(path_to_player) < 5 and footstep_channel.get_busy()):
-                self.mode = 'Chasing'
-                self.player_seen_pos = (int(player_y), int(player_x))
-                self.current_path = a_star(world, (int(self.y), int(self.x)), self.player_seen_pos)
-                self.view_angle = math.pi/3
+            if self.distance_to_player < 8:
+                # Spieler kann gehört werden wenn zu nah, len statt distance sodass es nicht durch wände geht
+                if self.can_see_player() or 0 < (len(path_to_player) < 5 and footstep_channel.get_busy()):
+                    self.mode = 'Chasing'
+                    self.player_seen_pos = (int(player_y), int(player_x))
+                    self.current_path = a_star(world, (int(self.y), int(self.x)), self.player_seen_pos)
+                    self.view_angle = math.pi/3
 
         if self.mode == 'Chasing':
             self.player_seen_pos = (int(player_y), int(player_x))
@@ -843,7 +842,8 @@ class Patroller:
             self.cur_dir = 'North' if vec_y > 0 else 'South'
 
         self.move_and_collide(deltatime)
-        self.heartbeat_sound(self.distance_to_player, self.mode=='Chasing')
+        if self.distance_to_player <= 8:
+            self.heartbeat_sound(self.distance_to_player, self.mode=='Chasing')
 
     def get_rotation_to_player(self):
         dx_to_player = player_x - self.x
@@ -1257,4 +1257,5 @@ def menu():
         pygame.display.update()
 
 #endregion
+
 menu()
