@@ -52,7 +52,7 @@ def set_spawn_and_end():
 
     return p1, p2
 
-player_spawn, _ = set_spawn_and_end()
+_, player_spawn = set_spawn_and_end()
 player_y, player_x = player_spawn
 
 player_energy = 100
@@ -116,9 +116,11 @@ GOAL_WALL_TEXTURE = pygame.image.load('assets/goal_wall.png').convert()
 WALL_TEXTURE_WIDTH, WALL_TEXTURE_HEIGHT = WALL_TEXTURE.get_size()
 
 VIGNETTE_SURF = pygame.image.load('assets/vignette.png').convert_alpha()
-VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size()).convert()
+VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size()).convert_alpha()
 
 GLOWSTICK_TEXTURE = pygame.transform.scale_by(pygame.image.load('assets/glowstick.png').convert_alpha(), 16)
+
+
 
 #endregion
 column_cache = {}
@@ -281,15 +283,15 @@ def draw_sprites():
         draw_end_x = sprite_width // 2 + sprite_screen_x
         if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
 
-        scaled_texture = pygame.transform.scale(texture, (sprite_width, sprite_height))
+        scaled_texture = pygame.transform.smoothscale(texture, (sprite_width, sprite_height))
         for stripe in range(draw_start_x, draw_end_x):
             if stripe < 0 or stripe > WIDTH: continue
             if transform_y < Z_BUFFER[stripe]:
-                tex_x = min(int((stripe - draw_start_x) * scaled_texture.get_width() / sprite_width), scaled_texture.get_width()-7)
-                column = scaled_texture.subsurface((tex_x, 0, 6, sprite_height))
+                tex_x = min(int((stripe - draw_start_x) * scaled_texture.get_width() / sprite_width), scaled_texture.get_width()-10)
+                column = scaled_texture.subsurface((tex_x, 0, 8, sprite_height))
 
                 blits.append((column, (stripe, draw_start_y)))
-        
+
     if len(blits) > 0:
         screen.blits(blits)
 
@@ -582,6 +584,7 @@ class Patroller:
         self.directions = ['North', 'West', 'South', 'East']
 
         self.player_seen_pos = None
+        self.distance_to_player = MAX_DISTANCE
 
         self.view_distance = 6
         self.view_angle = math.pi/4
@@ -599,7 +602,7 @@ class Patroller:
         spawns = []
         for y in range(height-1):
             if world[y][width-2] == 0:
-                spawns.append((y, width-1))
+                spawns.append((y, width-2))
 
         spawn = random.choice(spawns)
         return spawn[0]+0.5, spawn[1]+0.5
@@ -717,18 +720,19 @@ class Patroller:
 
     def update(self, deltatime):
         global player_x, player_y
-        distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
-        if distance_to_player < 8:
+        self.distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
+        if self.distance_to_player < 8:
             path_to_player = a_star(world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
         else:
             path_to_player = []
         close_to_player = False
 
         # Kill Player
-        if distance_to_player < 0.3:
+        if self.distance_to_player < 0.3:
             random_sound_channel.play(death_sound)
+            heartbeat_channel.fadeout(50)
             self.y, self.x = self.get_start_pos()
-            player_x, player_y = player_spawn
+            player_y, player_x = player_spawn
 
         # Fallback
         if path_to_player is None:
@@ -751,18 +755,18 @@ class Patroller:
                 path_to_player.pop(0)
 
             # Logik für verschiedene Szenarien
-            if distance_to_player > self.view_distance or (distance_to_player > self.view_distance/2 and not self.can_see_player()):
+            if self.distance_to_player > self.view_distance or (self.distance_to_player > self.view_distance/2 and not self.can_see_player()):
                 self.mode = 'Patrolling'
                 self.view_angle = math.pi/4
             if self.can_see_player():
-                if distance_to_player < 2:
+                if self.distance_to_player < 2:
                     close_to_player = True
                     self.current_path = [(player_y, player_x)]
                 else:
                     self.current_path = path_to_player
-            elif distance_to_player < 2:
+            elif self.distance_to_player < 2:
                 self.current_path = path_to_player
-            elif 2 <= distance_to_player < 4:
+            elif 2 <= self.distance_to_player < 4:
                 self.current_path = path_to_player[0:-1]
             else:
                 self.current_path = self.get_target_pos()
@@ -795,7 +799,7 @@ class Patroller:
             self.cur_dir = 'North' if vec_y > 0 else 'South'
 
         self.move_and_collide(deltatime)
-        self.heartbeat_sound(distance_to_player, self.mode=='Chasing')
+        self.heartbeat_sound(self.distance_to_player, self.mode=='Chasing')
 
     def get_rotation_to_player(self):
         dx_to_player = player_x - self.x
@@ -825,8 +829,17 @@ class Patroller:
         # back
         else:
             self.texture = self.back
+        
+        norm_distance = self.distance_to_player / MAX_VIEW_DISTANCE
+        norm_distance = min(max(norm_distance, 0), 1)
 
-        return {'x': self.x, 'y': self.y, 'texture': self.texture}
+        brightness = BRIGHTNESS_FALLOFF * (norm_distance ** 2)
+        c = int(abs(127 * (1 - brightness)))
+
+        final_text = self.texture.copy()
+        final_text.fill((c,c,c), special_flags=pygame.BLEND_MULT)
+
+        return {'x': self.x, 'y': self.y, 'texture': final_text}
 #endregion
 
 #region Worldgeneration
@@ -905,7 +918,7 @@ def main():
             world = wilsons_maze(cur_size, cur_size, 5)
             GRID_HEIGHT, GRID_WIDTH = len(world), len(world[0])
             # Pathfind weg erstellen
-            start_pos, end_pos = set_spawn_and_end()
+            end_pos, start_pos = set_spawn_and_end()
             maze_path = a_star(world, start_pos, end_pos)
             if maze_path is None:
                 continue
@@ -917,7 +930,10 @@ def main():
             place_checkpoints(start_pos, end_pos)
 
 
-        player_spawn = player_x, player_y = start_pos[0] + 0.5, start_pos[1] + 0.5
+        loading_screen('Placing Items...')
+        
+
+        player_spawn = player_y, player_x = start_pos[0] + 0.5, start_pos[1] + 0.5
         patroller = Patroller()
         SPRITES = []
         SPRITES.append({'x': patroller.x, 'y': patroller.y, 'texture': patroller.texture})
@@ -968,7 +984,8 @@ def main():
         player_controller(delta_time)
 
         patroller.update(delta_time)
-        SPRITES[0] = patroller.as_sprite()
+        if patroller.distance_to_player <= MAX_VIEW_DISTANCE:
+            SPRITES[0] = patroller.as_sprite()
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
