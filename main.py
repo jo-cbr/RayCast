@@ -52,10 +52,11 @@ def set_spawn_and_end():
 
     return p1, p2
 
-_, player_spawn = set_spawn_and_end()
+end_pos, player_spawn = set_spawn_and_end()
 player_y, player_x = player_spawn
 
 player_energy = 100
+player_speed_mult = 1
 player_view = None
 PLAYING = False
 
@@ -119,8 +120,17 @@ VIGNETTE_SURF = pygame.image.load('assets/vignette.png').convert_alpha()
 VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size()).convert_alpha()
 
 GLOWSTICK_TEXTURE = pygame.transform.scale_by(pygame.image.load('assets/glowstick.png').convert_alpha(), 16)
+glowstick_colors = [
+    (255, 0, 0), (0, 255, 0),
+    (0, 0, 255), (255, 255, 0),
+    (0, 255, 255), (255, 0, 255), 
+    (255, 200, 0), (128, 0, 255)
+]
 
-
+TORCH_TEXTURE = pygame.image.load('assets/items/torch.png').convert_alpha()
+CRYSTAL_BALL_TEXTURE = pygame.image.load('assets/items/crystal_ball.png').convert_alpha()
+CROSS_TEXTURE = pygame.image.load('assets/items/jesus_cross.png').convert_alpha()
+SPEED_BOOST_TEXTURE = pygame.image.load('assets/items/sprint_boost.png').convert_alpha()
 
 #endregion
 column_cache = {}
@@ -248,7 +258,6 @@ def draw_sprites():
 
     # Sprites nach Distanz sortieren
     SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
-
     for sprite in SPRITES:
         sprite_x = sprite['x'] - player_x
         sprite_y = sprite['y'] - player_y
@@ -261,9 +270,10 @@ def draw_sprites():
         transform_y = inv_det * (-plane_y * sprite_x + plane_x * sprite_y)
         if transform_y < 0.1:
             continue
-
         sprite_screen_x = int((WIDTH/2) * (1 + transform_x / transform_y))
         if not (0 <= sprite_screen_x < WIDTH):
+            continue
+        if Z_BUFFER[sprite_screen_x] > transform_y and Z_BUFFER[sprite_screen_x+texture_width] > transform_y:
             continue
 
         proj_wall_h = int((1.0 / transform_y) * PROJ_PLANE)
@@ -408,7 +418,8 @@ def player_controller(delta_time):
     # Alle globalen vars die gebraucht werden
     global player_x, player_y, player_angle, player_spawn, \
             cam_pitch, center_y, FOV, player_energy, PLAYING, \
-            walk_cycle, bob_offset_y, bob_offset_x, exhausted_played
+            walk_cycle, bob_offset_y, bob_offset_x, \
+            exhausted_played, player_speed_mult
 
     next_x, next_y = player_x, player_y
     move_speed = 1
@@ -482,10 +493,10 @@ def player_controller(delta_time):
     if keys[pygame.K_d]:
         strafe = 1
 
-    next_x += math.cos(player_angle) * move_speed * forward * delta_time
-    next_y += math.sin(player_angle) * move_speed * forward * delta_time
-    next_x += -math.sin(player_angle) * strafe_speed * strafe * delta_time
-    next_y += math.cos(player_angle) * strafe_speed * strafe * delta_time
+    next_x += math.cos(player_angle) * move_speed * forward * delta_time * player_speed_mult
+    next_y += math.sin(player_angle) * move_speed * forward * delta_time * player_speed_mult
+    next_x += -math.sin(player_angle) * strafe_speed * strafe * delta_time * player_speed_mult
+    next_y += math.cos(player_angle) * strafe_speed * strafe * delta_time * player_speed_mult
 
     # Potentielle Distanz berechnen. Wird verworfen falls is_empty() auf False läuft
     distance = (next_x - player_x)**2 + (next_y - player_y)**2
@@ -589,13 +600,13 @@ class Patroller:
         self.view_distance = 6
         self.view_angle = math.pi/4
 
-        #test surface
-        test_text = pygame.Surface((512, 1024))
         self.front = pygame.transform.scale_by(pygame.image.load('assets/eyeball.png').convert_alpha(), 20)
         self.right = pygame.transform.scale_by(pygame.image.load('assets/eyeball_side.png').convert_alpha(), 20)
         self.left = pygame.transform.flip(pygame.transform.scale_by(pygame.image.load('assets/eyeball_side.png').convert_alpha(), 20), True, False)
         self.back = pygame.transform.scale_by(pygame.image.load('assets/eyeball_back.png').convert_alpha(), 20)
-        self.texture = test_text
+        self.inactive = pygame.transform.scale_by(pygame.image.load('assets/eyeball_inactive.png').convert_alpha(), 20)
+        
+        self.active = True        
 
     def get_start_pos(self) -> tuple[int, int]:
         height = width = len(world)-1
@@ -720,6 +731,8 @@ class Patroller:
 
     def update(self, deltatime):
         global player_x, player_y
+        if not self.active:
+            return
         self.distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
         if self.distance_to_player < 8:
             path_to_player = a_star(world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
@@ -815,6 +828,8 @@ class Patroller:
         return angle
 
     def as_sprite(self):
+        if not self.active:
+            return {'x': self.x, 'y': self.y, 'texture': self.inactive}
         angle = self.get_rotation_to_player()
 
         #front
@@ -840,6 +855,107 @@ class Patroller:
         final_text.fill((c,c,c), special_flags=pygame.BLEND_MULT)
 
         return {'x': self.x, 'y': self.y, 'texture': final_text}
+#endregion
+
+#region Items
+ITEMS = []
+class Item:
+    def __init__(self, pos):
+        global SPRITES
+        self.y, self.x = pos
+        self.duration = 0
+        self.time_passed = 0
+        self.ability_used = False
+        self.get_random_type()
+        self.sprite_dict = {'x': self.x, 'y': self.y, 'texture': self.texture}
+        SPRITES.append(self.sprite_dict)
+
+    def get_random_type(self):
+        # type = [duration, ability_func, revert_ability_func]
+        types = [
+            ['torch', 15, self.increase_max_view_dist, self.decrease_max_view_dist, TORCH_TEXTURE],
+            ['cross', 30, self.set_patroller_inactive, self.set_patroller_active, CROSS_TEXTURE],
+            ['speed_boost', 10, self.speed_up_player, self.slow_down_player, SPEED_BOOST_TEXTURE],
+            ['crystal_ball', None, self.show_path, None, CRYSTAL_BALL_TEXTURE]
+        ]
+
+        random_type = random.choice(types)
+
+        self.name = random_type[0]
+        self.duration = random_type[1]
+        self.ability_func = random_type[2]
+        self.revert_ability_func = random_type[3]
+        self.texture = pygame.transform.scale_by(random_type[4], 20)
+
+    def increase_max_view_dist(self):
+        global MAX_VIEW_DISTANCE
+        MAX_VIEW_DISTANCE = 16
+    def decrease_max_view_dist(self):
+        global MAX_VIEW_DISTANCE
+        MAX_VIEW_DISTANCE = 8
+
+    def set_patroller_inactive(self):
+        global patroller
+        patroller.active = False
+    def set_patroller_active(self):
+        global patroller
+        patroller.active = True
+
+    def speed_up_player(self):
+        global player_speed_mult
+        player_speed_mult = 2
+    def slow_down_player(self):
+        global player_speed_mult
+        player_speed_mult = 1
+
+    def show_path(self):
+        path = a_star(world, (int(player_y), int(player_x)), end_pos)
+        shown_path = path[1:6]
+        for pos in shown_path:
+            glowstick_tex = GLOWSTICK_TEXTURE.copy()
+            color = random.choice(glowstick_colors)
+            glowstick_tex.fill(color, special_flags=pygame.BLEND_RGBA_MULT)
+            SPRITES.append({'x': pos[1]+0.5, 'y': pos[0]+0.5, 'texture': glowstick_tex})
+
+    def update(self, deltatime):
+        if self.ability_used:
+            self.time_passed += deltatime
+            if self.time_passed >= self.duration:
+                if self.revert_ability_func is not None:
+                    self.revert_ability_func()
+                self.time_passed = 0
+                self.ability_used = False
+            return
+
+        distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
+        if distance_to_player > 1:
+            return
+        
+        if distance_to_player < 0.2:
+            if self.ability_func is not None:
+                self.ability_func()
+                self.ability_used = True
+                SPRITES.remove(self.sprite_dict)
+                ITEMS.remove(self)
+
+def spawn_items():
+    empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[x, y] == 0]
+    dead_ends = []
+    for pos in empty_cells:
+        r, c = pos
+        # Prüfen ob Sackgasse
+        if ((world[r-1, c] == 0 and world[r+1, c] == 1 and world[r, c-1] == 1 and world[r, c+1] == 1) or
+            (world[r-1, c] == 1 and world[r+1, c] == 0 and world[r, c-1] == 1 and world[r, c+1] == 1) or
+            (world[r-1, c] == 1 and world[r+1, c] == 1 and world[r, c-1] == 0 and world[r, c+1] == 1) or
+            (world[r-1, c] == 1 and world[r+1, c] == 1 and world[r, c-1] == 1 and world[r, c+1] == 0)):
+            dead_ends.append((r, c))
+    
+    random.shuffle(dead_ends)
+    for pos in dead_ends:
+        if random.randint(1, 10) == 10:
+            item_pos = pos[0]+0.5, pos[1]+0.5
+            item = Item(item_pos)
+            ITEMS.append(item)
 #endregion
 
 #region Worldgeneration
@@ -894,18 +1010,11 @@ patroller = None
 def main():
     global cam_pitch, player_view, PLAYING, GRID_HEIGHT, GRID_WIDTH, \
         player_x, player_y, player_spawn, world, TIMER, SPRITES, ENERGY_FACTOR,\
-        patroller
+        patroller, end_pos
     mouse_visible = False
     mouse_grab = True
     pygame.mouse.set_visible(mouse_visible)
     pygame.event.set_grab(mouse_grab)
-    
-    glowstick_colors = [
-        (255, 0, 0), (0, 255, 0),
-        (0, 0, 255), (255, 255, 0),
-        (0, 255, 255), (255, 0, 255), 
-        (255, 200, 0), (128, 0, 255)
-    ]
 
     spray_cooldown = 1.0
     last_sprayed = 1.0
@@ -929,14 +1038,15 @@ def main():
             loading_screen('Placing Checkpoints...')
             place_checkpoints(start_pos, end_pos)
 
+        SPRITES=[]
+        loading_screen('Spawning Enemies...')
+        patroller = Patroller()
 
         loading_screen('Placing Items...')
-        
+        spawn_items()
 
         player_spawn = player_y, player_x = start_pos[0] + 0.5, start_pos[1] + 0.5
-        patroller = Patroller()
-        SPRITES = []
-        SPRITES.append({'x': patroller.x, 'y': patroller.y, 'texture': patroller.texture})
+        SPRITES.append({'x': patroller.x, 'y': patroller.y, 'texture': patroller.front})
 
         ENERGY_FACTOR = 128/cur_size
         PLAYING = True
@@ -986,6 +1096,9 @@ def main():
         patroller.update(delta_time)
         if patroller.distance_to_player <= MAX_VIEW_DISTANCE:
             SPRITES[0] = patroller.as_sprite()
+
+        for i in ITEMS:
+            i.update(delta_time)
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
