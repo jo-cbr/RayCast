@@ -1,6 +1,7 @@
-import pygame, math, random
+import pygame, math, random, cProfile
 from pygame_button import Button
 from maze_generator import *
+from collections import OrderedDict
 
 pygame.init()
 pygame.mixer.init()
@@ -133,8 +134,25 @@ CROSS_TEXTURE = pygame.image.load('assets/items/jesus_cross.png').convert_alpha(
 SPEED_BOOST_TEXTURE = pygame.image.load('assets/items/sprint_boost.png').convert_alpha()
 
 #endregion
-column_cache = {}
+column_cache = OrderedDict()
 CACHE_MAX_SIZE = 4096
+def get_cached_column(cache_key, texture, texture_x, target_height):
+    col_surf = column_cache.get(cache_key)
+    if col_surf is not None:
+        column_cache.move_to_end(cache_key)
+        return col_surf
+    
+    texture_height = texture.get_height()
+    tx = max(0, min(texture.get_width() - 1, texture_x))
+    tex_col = texture.subsurface((tx, 0, 1, texture_height))
+    col_surf = pygame.transform.scale(tex_col, (RAY_STEP, target_height))
+
+    column_cache[cache_key] = col_surf
+    if len(column_cache) > CACHE_MAX_SIZE:
+        column_cache.popitem(last=False)
+    return col_surf
+
+
 QUANTIZE_HEIGHT = 4
 
 RAY_STEP = 8
@@ -208,18 +226,7 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
 
 
     cache_key = (texture_x, target_height, grid_value)
-    col_surf = column_cache.get(cache_key)
-
-    if col_surf is None:
-        texture_height = texture.get_height()
-        tx = max(0, min(texture.get_width() - 1, texture_x))
-        tex_col = texture.subsurface((tx, 0, 1, texture_height))
-        col_surf = pygame.transform.scale(tex_col, (RAY_STEP, target_height))
-
-        if len(column_cache) > CACHE_MAX_SIZE:
-            column_cache.pop(next(iter(column_cache)))
-
-        column_cache[cache_key] = col_surf
+    col_surf = get_cached_column(cache_key, texture, texture_x, target_height)
 
 
     # Helligkeit managen
@@ -273,27 +280,28 @@ def draw_sprites():
         sprite_screen_x = int((WIDTH/2) * (1 + transform_x / transform_y))
         if not (0 <= sprite_screen_x < WIDTH):
             continue
-        if Z_BUFFER[sprite_screen_x] > transform_y and Z_BUFFER[sprite_screen_x+texture_width] > transform_y:
-            continue
 
         proj_wall_h = int((1.0 / transform_y) * PROJ_PLANE)
+        if proj_wall_h > HEIGHT*10:
+            continue
 
         sprite_height = abs(int(texture_height / transform_y))
         sprite_width = abs(int(texture_width / transform_y))
         
         wall_bottom_y = int(center_y + proj_wall_h//2 + cam_pitch + bob_offset_y)
-        draw_start_y = wall_bottom_y - sprite_height
         if wall_bottom_y - sprite_height > HEIGHT:
             continue
         elif wall_bottom_y + sprite_height < 0:
             continue
+
+        draw_start_y = wall_bottom_y - sprite_height
         
         draw_start_x = -sprite_width // 2 + sprite_screen_x
         if draw_start_x < -sprite_width: draw_start_x = 0
         draw_end_x = sprite_width // 2 + sprite_screen_x
         if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
 
-        scaled_texture = pygame.transform.smoothscale(texture, (sprite_width, sprite_height))
+        scaled_texture = pygame.transform.scale(texture, (sprite_width, sprite_height))
         for stripe in range(draw_start_x, draw_end_x):
             if stripe < 0 or stripe > WIDTH: continue
             if transform_y < Z_BUFFER[stripe]:
@@ -314,20 +322,26 @@ def cast_rays():
     map_x = int(player_x)
     map_y = int(player_y)
 
-    cos_vals = [math.cos(player_angle - FOV*0.5 + (i/WIDTH) * FOV) for i in range(0, WIDTH, RAY_STEP)]
-    sin_vals = [math.sin(player_angle - FOV*0.5 + (i/WIDTH) * FOV) for i in range(0, WIDTH, RAY_STEP)]
+    cos_vals = []
+    sin_vals = []
+    cos_corrections = []
+
+    for idx, i in enumerate(range(0, WIDTH, RAY_STEP)):
+        ray_angle = player_angle - half_fov + (i/WIDTH) * FOV
+        cos_vals.append(math.cos(player_angle - FOV*0.5 + (i/WIDTH) * FOV))
+        sin_vals.append(math.sin(player_angle - FOV*0.5 + (i/WIDTH) * FOV))
+        cos_corrections.append(math.cos(ray_angle - player_angle))
 
     for idx, i in enumerate(range(0, WIDTH, RAY_STEP)):
         dir_x = cos_vals[idx]
         dir_y = sin_vals[idx]
-        data = cast_single_ray(i, half_fov, map_x, map_y, dir_x, dir_y)
+        cos_correction = cos_corrections[idx]
+        data = cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction)
         ray_data.append(data)
     return ray_data
 
-def cast_single_ray(i, half_fov, map_x, map_y, dir_x, dir_y):
+def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
     global Z_BUFFER
-    ray_angle = player_angle - half_fov + (i/WIDTH) * FOV
-
     # Strecke pro Spalte
     if dir_x == 0:
         delta_distance_x = float("inf")
@@ -377,7 +391,7 @@ def cast_single_ray(i, half_fov, map_x, map_y, dir_x, dir_y):
             side = 0
             raw_dist = (side_dist_x - delta_distance_x + side_dist_y - delta_distance_y) / 2
 
-        grid_value = world[map_y][map_x]
+        grid_value = world[map_y, map_x]
         if 0 <= map_x < GRID_WIDTH and 0 <= map_y < GRID_HEIGHT:
             if grid_value != 0:
                 hit = True
@@ -386,7 +400,6 @@ def cast_single_ray(i, half_fov, map_x, map_y, dir_x, dir_y):
             raw_dist = min(raw_dist, MAX_DISTANCE)
             hit = True
 
-    cos_correction = math.cos(ray_angle - player_angle)
     perp_distance = max(raw_dist * cos_correction, 0.01)
     if side == 0:
         wall_coord = player_y + raw_dist * dir_y
@@ -651,6 +664,30 @@ class Patroller:
         if world[ty, tx] == 0:
             return [(ty, tx)]
 
+    def has_line_of_sight(self, x0, y0, x1, y1, grid):
+        # Bresenham Line of Sight Check, ähnlich wie durch grid wandern in raycast
+        x0, y0 = int(x0), int(y0)
+        x1, y1 = int(x1), int(y1)
+
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        while True:
+            if grid[y0][x0] != 0:
+                return False
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x0 += sx
+            if e2 < dx:
+                err += dx
+                y0 += sy
+        return True
 
     def can_see_player(self):
         dx = player_x - self.x
@@ -666,14 +703,8 @@ class Patroller:
         if angle > self.view_angle:
             return False
 
-        steps = int(dist*2)
-        for i in range(1, steps):
-            sy = int(self.y + dy * (i/steps))
-            sx = int(self.x + dx * (i/steps))
-            if world[sy, sx] != 0:
-                return False
-
-        return True
+        if not self.has_line_of_sight(self.x, self.y, player_x, player_y, world):
+            return False
 
     def move_and_collide(self, deltatime):
         step_x = self.dx * self.speed * deltatime * (1.5 if self.mode == 'Chasing' else 1)
@@ -828,12 +859,14 @@ class Patroller:
         return angle
 
     def as_sprite(self):
+        if self.distance_to_player > MAX_VIEW_DISTANCE:
+            return {'x': self.x, 'y': self.y, 'texture': pygame.Surface((1, 1))}
+        angle = self.get_rotation_to_player()
+        
         if not self.active:
             return {'x': self.x, 'y': self.y, 'texture': self.inactive}
-        angle = self.get_rotation_to_player()
-
         #front
-        if -math.pi/4 <= angle <= math.pi/4:
+        elif -math.pi/4 <= angle <= math.pi/4:
             self.texture = self.front
         #left
         elif math.pi/4 < angle < 3*math.pi/4:
@@ -925,21 +958,21 @@ class Item:
                     self.revert_ability_func()
                 self.time_passed = 0
                 self.ability_used = False
-            return
-
-        distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
-        if distance_to_player > 1:
-            return
-        
-        if distance_to_player < 0.2:
-            if self.ability_func is not None:
-                self.ability_func()
-                self.ability_used = True
-                SPRITES.remove(self.sprite_dict)
                 ITEMS.remove(self)
+            return
+        else:
+            distance_to_player = (player_x-self.x) ** 2 + (player_y-self.y) ** 2
+            if distance_to_player > 1:
+                return
+            
+            if distance_to_player < 0.04:
+                if self.ability_func is not None:
+                    self.ability_func()
+                    self.ability_used = True
+                    SPRITES.remove(self.sprite_dict)
 
 def spawn_items():
-    empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[x, y] == 0]
+    empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[y, x] == 0]
     dead_ends = []
     for pos in empty_cells:
         r, c = pos
@@ -960,7 +993,7 @@ def spawn_items():
 
 #region Worldgeneration
 def place_checkpoints(start, end):
-    empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[x, y] == 0]
+    empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[y, x] == 0]
     candidates = []
     for pos in empty_cells:
         r, c = pos
