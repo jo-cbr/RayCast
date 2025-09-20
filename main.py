@@ -122,9 +122,9 @@ GLOWSTICK_TEXTURE = pygame.transform.scale_by(pygame.image.load('assets/glowstic
 #endregion
 column_cache = {}
 CACHE_MAX_SIZE = 4096
-QUANTIZE_HEIGHT = 2
+QUANTIZE_HEIGHT = 4
 
-RAY_STEP = 6
+RAY_STEP = 5
 
 BRIGHTNESS_FALLOFF = 2
 #region Draw Funcs
@@ -162,10 +162,17 @@ def draw_ray_data(ray_data):
         4: CHECKPOINT_WALL_TEXTURE,
         5: SAVED_CHECKPOINT_WALL_TEXTURE,
     }
+    ray_blits = []
+
     for ray in ray_data:
         wall_height, screen_x, distance, side, grid_value, text_x, wall_pos = ray
         texture = textures[grid_value]
-        draw_ray(wall_height, screen_x, distance, side, grid_value, text_x, texture)
+        result = draw_ray(wall_height, screen_x, distance, side, grid_value, text_x, texture)
+        if result:
+            ray_blits.append(result)
+
+    if ray_blits:
+        screen.blits(ray_blits)
 
 def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, texture):
     final_x = screen_x + bob_offset_x
@@ -200,28 +207,31 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
 
         column_cache[cache_key] = col_surf
 
-    screen.blit(col_surf, (final_x, top_y))
 
     # Helligkeit managen
     norm_distance = distance / MAX_VIEW_DISTANCE
     brightness = BRIGHTNESS_FALLOFF * (norm_distance ** 2)
     brightness = min(max(brightness, 0), 1)
 
-    shadow_color = brightness * 48 + (0 if side else 8)
+    col_surf_final = col_surf.copy()
 
-    rect = pygame.Rect(final_x, top_y, RAY_STEP, target_height)
+    sc = 128 * brightness
+    shadow_color = (sc, sc, sc)
 
     # Legt finales "Schatten Layer" über Surface
     if grid_value == 2:
-        screen.fill((64, 0, 0), rect, special_flags=pygame.BLEND_ADD)
-    screen.fill((shadow_color, shadow_color, shadow_color), rect, special_flags=pygame.BLEND_SUB)
+        col_surf_final.fill((64, 0, 0), special_flags=pygame.BLEND_RGB_MULT)
+    col_surf_final.fill(shadow_color, special_flags=pygame.BLEND_SUB)
+
+    col_blit = (col_surf_final, (final_x, top_y))
+    return col_blit
 
 SPRITES = []
 
 def draw_sprites():
-    # Sprites nach Distanz sortieren
     if len(SPRITES) == 0:
         return
+    
     half_fov = FOV*0.5
 
     dir_x = math.cos(player_angle)
@@ -232,6 +242,9 @@ def draw_sprites():
     det = plane_x * dir_y - dir_x * plane_y
     inv_det = 1 / det
 
+    blits = []
+
+    # Sprites nach Distanz sortieren
     SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
 
     for sprite in SPRITES:
@@ -245,8 +258,6 @@ def draw_sprites():
         transform_x = inv_det * (dir_y * sprite_x - dir_x * sprite_y)
         transform_y = inv_det * (-plane_y * sprite_x + plane_x * sprite_y)
         if transform_y < 0.1:
-            continue
-        if transform_y > MAX_DISTANCE:
             continue
 
         sprite_screen_x = int((WIDTH/2) * (1 + transform_x / transform_y))
@@ -262,24 +273,26 @@ def draw_sprites():
         draw_start_y = wall_bottom_y - sprite_height
         if wall_bottom_y - sprite_height > HEIGHT:
             continue
+        elif wall_bottom_y + sprite_height < 0:
+            continue
         
         draw_start_x = -sprite_width // 2 + sprite_screen_x
         if draw_start_x < -sprite_width: draw_start_x = 0
         draw_end_x = sprite_width // 2 + sprite_screen_x
         if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
 
+        scaled_texture = pygame.transform.scale(texture, (sprite_width, sprite_height))
         for stripe in range(draw_start_x, draw_end_x):
             if stripe < 0 or stripe > WIDTH: continue
             if transform_y < Z_BUFFER[stripe]:
-                tex_x = min(int((stripe - draw_start_x) * texture_width / sprite_width), texture_width-2)
-                scaling_factor = max(sprite_width / texture_width, 6)
-                column = pygame.transform.scale(
-                    texture.subsurface((tex_x, 0, 1, texture_height)),
-                    (scaling_factor , sprite_height)
-                )
-                screen.blit(column, (stripe, draw_start_y))
+                tex_x = min(int((stripe - draw_start_x) * scaled_texture.get_width() / sprite_width), scaled_texture.get_width()-7)
+                column = scaled_texture.subsurface((tex_x, 0, 6, sprite_height))
 
-        pygame.draw.rect(screen, (255,0,0), (draw_start_x, draw_start_y, sprite_width, sprite_height), width = 1)
+                blits.append((column, (stripe, draw_start_y)))
+        
+    if len(blits) > 0:
+        screen.blits(blits)
+
 #endregion
 
 #region Ray Cast Funcs
@@ -521,16 +534,31 @@ def check_distance_to_wall(px, py, margin = 0.15):
     dx = px - gx
     dy = py - gy
 
+    # orthogonal
     neighbors = [
-        (gx - 1, gy, dx),  # links
+        (gx - 1, gy, dx),      # links
         (gx + 1, gy, 1 - dx),  # rechts
-        (gx, gy - 1, dy),  # oben
-        (gx, gy + 1, 1 - dy) # unten
+        (gx, gy - 1, dy),      # oben
+        (gx, gy + 1, 1 - dy),  # unten
     ]
     for nx, ny, dist_frac in neighbors:
         if 0 <= ny < len(world) and 0 <= nx < len(world[0]):
             if world[ny][nx] != 0 and dist_frac < margin:
                 return False
+            
+    
+    # diagonal
+    diagonals = [
+        (gx - 1, gy - 1, max(dx, dy)),          # oben links
+        (gx + 1, gy - 1, max(1 - dx, dy)),      # oben rechts
+        (gx - 1, gy + 1, max(dx, 1 - dy)),      # unten links
+        (gx + 1, gy + 1, max(1 - dx, 1 - dy)),  # unten rechts
+    ]
+    for nx, ny, dist_frac in diagonals:
+        if 0 <= ny < len(world) and 0 <= nx < len(world[0]):
+            if world[ny][nx] != 0 and dist_frac < margin:
+                return False
+
     return True
 
 def is_empty(x, y):
@@ -682,7 +710,7 @@ class Patroller:
 
         if sound is not None:
             if heartbeat_channel.get_sound() != sound:
-                heartbeat_channel.fadeout(50)
+                heartbeat_channel.fadeout(25)
             if not heartbeat_channel.get_busy():
                 heartbeat_channel.play(sound)
             
@@ -690,7 +718,7 @@ class Patroller:
     def update(self, deltatime):
         global player_x, player_y
         distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
-        if distance_to_player < 16:
+        if distance_to_player < 8:
             path_to_player = a_star(world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
         else:
             path_to_player = []
@@ -897,6 +925,10 @@ def main():
         ENERGY_FACTOR = 128/cur_size
         PLAYING = True
 
+    # Fallback
+    if patroller is None:
+        patroller = Patroller()
+
     clock.tick(FPS)
     while True:
         dt_ms = clock.tick(FPS)
@@ -940,7 +972,7 @@ def main():
 
         if last_sprayed < spray_cooldown:
             last_sprayed += delta_time
-
+        
         pygame.display.update()
 
 #region Buttons and Main Menu
