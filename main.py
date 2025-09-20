@@ -16,7 +16,7 @@ cur_size = 32
 MAX_DISTANCE = 32
 MAX_VIEW_DISTANCE = 8
 
-WIDTH, HEIGHT = 1440, 720
+WIDTH, HEIGHT = 1920, 1080
 screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=True)
 center_y = HEIGHT // 2
 
@@ -80,15 +80,16 @@ exhausted.set_volume(2)
 random_sound_channel = pygame.mixer.Channel(2)
 random_sound_channel.set_source_location(180, 5)
 wind_sound = pygame.mixer.Sound('assets/wind_sound.mp3')
-wind_sound.set_volume(1)
+wind_sound.set_volume(1.1)
 intense_sound = pygame.mixer.Sound('assets/intense_suspense.mp3')
-intense_sound.set_volume(0.1)
+intense_sound.set_volume(0.2)
 footsteps_behind = pygame.mixer.Sound('assets/footsteps_behind.mp3')
 humming = pygame.mixer.Sound('assets/humming.mp3')
 ghost_sound = pygame.mixer.Sound('assets/ghost_sound.mp3')
 branch_cracking = pygame.mixer.Sound('assets/cracking_sound.mp3')
+branch_cracking.set_volume(0.8)
 death_sound = pygame.mixer.Sound('assets/death_beep.mp3')
-death_sound.set_volume(0.5)
+death_sound.set_volume(0.7)
 
 heartbeat_channel = pygame.mixer.Channel(3)
 heartbeat_slow = pygame.mixer.Sound('assets/heartbeat_slow.mp3')
@@ -140,7 +141,8 @@ def draw_energy():
     c = int(255*(player_energy/100))
     color = (255, c, c)
     energy_rect = pygame.Rect(int(WIDTH*0.02), int(HEIGHT*0.02), int(WIDTH*0.2*(player_energy/100)), int(HEIGHT*0.03))
-    pygame.draw.rect(screen, (128, 128, 128), pygame.Rect(int(WIDTH*0.02), int(HEIGHT*0.02), int(WIDTH*0.2), int(HEIGHT*0.03)))
+    bg_rect = pygame.Rect(int(WIDTH*0.02), int(HEIGHT*0.02), int(WIDTH*0.2), int(HEIGHT*0.03))
+    pygame.draw.rect(screen, (92, 92, 92), bg_rect)
     pygame.draw.rect(screen, color, energy_rect)
 
 def draw_timer():
