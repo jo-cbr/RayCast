@@ -98,6 +98,9 @@ heartbeat_slow = pygame.mixer.Sound('assets/heartbeat_slow.mp3')
 heartbeat_medium = pygame.mixer.Sound('assets/heartbeat_medium.mp3')
 heartbeat_fast = pygame.mixer.Sound('assets/heartbeat_fast.mp3')
 
+item_channel = pygame.mixer.Channel(4)
+gong = pygame.mixer.Sound('assets/gong_sound.mp3')
+
 def handle_random_sounds():
     global random_sound_channel
     rare_sounds = [wind_sound, footsteps_behind, intense_sound, branch_cracking, humming, ghost_sound]
@@ -246,12 +249,10 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
     return col_blit
 
 SPRITES = []
-
+half_fov = FOV*0.5
 def draw_sprites():
     if len(SPRITES) == 0:
         return
-    
-    half_fov = FOV*0.5
 
     dir_x = math.cos(player_angle)
     dir_y = math.sin(player_angle)
@@ -260,8 +261,6 @@ def draw_sprites():
 
     det = plane_x * dir_y - dir_x * plane_y
     inv_det = 1 / det
-
-    blits = []
 
     # Sprites nach Distanz sortieren
     SPRITES.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
@@ -302,6 +301,7 @@ def draw_sprites():
         if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
 
         scaled_texture = pygame.transform.scale(texture, (sprite_width, sprite_height))
+        blits = []
         for stripe in range(draw_start_x, draw_end_x):
             if stripe < 0 or stripe > WIDTH: continue
             if transform_y < Z_BUFFER[stripe]:
@@ -310,8 +310,8 @@ def draw_sprites():
 
                 blits.append((column, (stripe, draw_start_y)))
 
-    if len(blits) > 0:
-        screen.blits(blits)
+        if len(blits) > 0:
+            screen.blits(blits)
 
 #endregion
 
@@ -464,7 +464,8 @@ def player_controller(delta_time):
         if pygame.mouse.get_just_released()[0]:
             dir_x = math.cos(player_angle)
             dir_y = math.sin(player_angle)
-            result = cast_single_ray(int(WIDTH*0.5), FOV*0.5,int(player_x), int(player_y), dir_x, dir_y)
+            cos_correction = math.cos(0)
+            result = cast_single_ray(int(WIDTH*0.5), int(player_x), int(player_y), dir_x, dir_y, cos_correction)
             if result[4] == 2 and result[2] <= 1.5:
                 PLAYING = False
                 menu()
@@ -859,12 +860,10 @@ class Patroller:
         return angle
 
     def as_sprite(self):
-        if self.distance_to_player > MAX_VIEW_DISTANCE:
-            return {'x': self.x, 'y': self.y, 'texture': pygame.Surface((1, 1))}
         angle = self.get_rotation_to_player()
         
         if not self.active:
-            return {'x': self.x, 'y': self.y, 'texture': self.inactive}
+            return {'type': 'Inactive Patroller', 'x': self.x, 'y': self.y, 'texture': self.inactive}
         #front
         elif -math.pi/4 <= angle <= math.pi/4:
             self.texture = self.front
@@ -887,11 +886,14 @@ class Patroller:
         final_text = self.texture.copy()
         final_text.fill((c,c,c), special_flags=pygame.BLEND_MULT)
 
-        return {'x': self.x, 'y': self.y, 'texture': final_text}
+        return {'type': 'Patroller', 'x': self.x, 'y': self.y, 'texture': final_text}
 #endregion
 
 #region Items
 ITEMS = []
+ITEM_FONT = pygame.font.SysFont('Garamond', 48)
+
+ACTIVE_BUFFS = []
 class Item:
     def __init__(self, pos):
         global SPRITES
@@ -900,16 +902,16 @@ class Item:
         self.time_passed = 0
         self.ability_used = False
         self.get_random_type()
-        self.sprite_dict = {'x': self.x, 'y': self.y, 'texture': self.texture}
+        self.sprite_dict = {'type': f'Item {self.name}', 'x': self.x, 'y': self.y, 'texture': self.texture}
         SPRITES.append(self.sprite_dict)
 
     def get_random_type(self):
         # type = [duration, ability_func, revert_ability_func]
         types = [
-            ['torch', 15, self.increase_max_view_dist, self.decrease_max_view_dist, TORCH_TEXTURE],
-            ['cross', 30, self.set_patroller_inactive, self.set_patroller_active, CROSS_TEXTURE],
-            ['speed_boost', 10, self.speed_up_player, self.slow_down_player, SPEED_BOOST_TEXTURE],
-            ['crystal_ball', None, self.show_path, None, CRYSTAL_BALL_TEXTURE]
+            ['torch', 25, self.increase_max_view_dist, self.decrease_max_view_dist, TORCH_TEXTURE, 'Let there be Light'],
+            ['cross', 30, self.set_patroller_inactive, self.set_patroller_active, CROSS_TEXTURE, 'The Lord is my shepherd'],
+            ['speed_boost', 10, self.speed_up_player, self.slow_down_player, SPEED_BOOST_TEXTURE, 'Ethereal Stride'],
+            ['crystal_ball', 3, self.show_path, None, CRYSTAL_BALL_TEXTURE, 'All shall be revealed']
         ]
 
         random_type = random.choice(types)
@@ -919,6 +921,8 @@ class Item:
         self.ability_func = random_type[2]
         self.revert_ability_func = random_type[3]
         self.texture = pygame.transform.scale_by(random_type[4], 20)
+        self.font_render = ITEM_FONT.render(random_type[5], True, (128, 128, 128))
+        self.font_rect = self.font_render.get_rect(center=(WIDTH//2, center_y))
 
     def increase_max_view_dist(self):
         global MAX_VIEW_DISTANCE
@@ -936,26 +940,36 @@ class Item:
 
     def speed_up_player(self):
         global player_speed_mult
-        player_speed_mult = 2
+        player_speed_mult = 1.5
     def slow_down_player(self):
         global player_speed_mult
         player_speed_mult = 1
 
     def show_path(self):
+        global SPRITES
         path = a_star(world, (int(player_y), int(player_x)), end_pos)
         shown_path = path[1:6]
         for pos in shown_path:
             glowstick_tex = GLOWSTICK_TEXTURE.copy()
             color = random.choice(glowstick_colors)
             glowstick_tex.fill(color, special_flags=pygame.BLEND_RGBA_MULT)
-            SPRITES.append({'x': pos[1]+0.5, 'y': pos[0]+0.5, 'texture': glowstick_tex})
+            SPRITES.append({'type': 'Glowstick', 'x': pos[1]+0.5, 'y': pos[0]+0.5, 'texture': glowstick_tex})
 
     def update(self, deltatime):
+        global SPRITES
         if self.ability_used:
+            if self.duration is None:
+                ITEMS.remove(self)
+                return
             self.time_passed += deltatime
+            if 0.01 <= self.time_passed <= 3:
+                self.font_render.set_alpha(255-255*(self.time_passed/3))
+                screen.blit(self.font_render, self.font_rect)
             if self.time_passed >= self.duration:
-                if self.revert_ability_func is not None:
-                    self.revert_ability_func()
+                ACTIVE_BUFFS.remove(self.name)
+                if self.name not in ACTIVE_BUFFS:
+                    if self.revert_ability_func is not None:
+                        self.revert_ability_func()
                 self.time_passed = 0
                 self.ability_used = False
                 ITEMS.remove(self)
@@ -965,11 +979,16 @@ class Item:
             if distance_to_player > 1:
                 return
             
-            if distance_to_player < 0.04:
+            if distance_to_player < 0.1:
                 if self.ability_func is not None:
                     self.ability_func()
                     self.ability_used = True
-                    SPRITES.remove(self.sprite_dict)
+                    ACTIVE_BUFFS.append(self.name)
+                    item_channel.play(gong)
+                    if self.sprite_dict in SPRITES:
+                        SPRITES.remove(self.sprite_dict)
+                    else:
+                        print('Non existent sprite error!')
 
 def spawn_items():
     empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[y, x] == 0]
@@ -985,7 +1004,7 @@ def spawn_items():
     
     random.shuffle(dead_ends)
     for pos in dead_ends:
-        if random.randint(1, 10) == 10:
+        if random.randint(1, 10) > 8:
             item_pos = pos[0]+0.5, pos[1]+0.5
             item = Item(item_pos)
             ITEMS.append(item)
@@ -1071,15 +1090,15 @@ def main():
             loading_screen('Placing Checkpoints...')
             place_checkpoints(start_pos, end_pos)
 
-        SPRITES=[]
         loading_screen('Spawning Enemies...')
+        SPRITES=[]
         patroller = Patroller()
+        SPRITES.append({'type': 'Patroller', 'x': patroller.x, 'y': patroller.y, 'texture': patroller.front})
 
         loading_screen('Placing Items...')
         spawn_items()
 
         player_spawn = player_y, player_x = start_pos[0] + 0.5, start_pos[1] + 0.5
-        SPRITES.append({'x': patroller.x, 'y': patroller.y, 'texture': patroller.front})
 
         ENERGY_FACTOR = 128/cur_size
         PLAYING = True
