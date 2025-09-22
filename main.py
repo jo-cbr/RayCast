@@ -98,6 +98,7 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
     return col_blit
 
 def draw_sprites(sprites):
+    global player_angle, half_fov
     if len(sprites) == 0:
         return
 
@@ -161,7 +162,7 @@ def draw_sprites(sprites):
 
         if len(blits) > 0:
             screen.blits(blits)
-
+        
 #endregion
 
 #region Ray Cast Funcs
@@ -234,12 +235,13 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
             side = 0
             raw_dist = (side_dist_x - delta_distance_x + side_dist_y - delta_distance_y) / 2
 
+        
+        grid_value = world[map_y][map_x]
 
         if map_x < 0 or map_y < 0 or map_x >= GRID_WIDTH or map_y >= GRID_WIDTH:
             raw_dist = min(raw_dist, MAX_DISTANCE)
-            break
+            hit = True
 
-        grid_value = world[map_y, map_x]
         if 0 <= map_x < GRID_WIDTH and 0 <= map_y < GRID_HEIGHT:
             if grid_value != 0:
                 hit = True
@@ -248,6 +250,7 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
             raw_dist = min(raw_dist, MAX_DISTANCE)
             hit = True
 
+    
     perp_distance = max(raw_dist * cos_correction, 0.01)
     if side == 0:
         wall_coord = player_y + raw_dist * dir_y
@@ -612,8 +615,8 @@ class Patroller:
     def update(self, deltatime):
         global player_x, player_y
         self.distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
-        if self.distance_to_player <= MAX_VIEW_DISTANCE:
-            draw_sprites([self.as_sprite()])
+        # if self.distance_to_player <= MAX_VIEW_DISTANCE:
+        draw_sprites([self.as_sprite()])
         if not self.active:
             return
         if self.distance_to_player < 8:
@@ -710,7 +713,7 @@ class Patroller:
 
     def as_sprite(self):
         if self.distance_to_player > MAX_VIEW_DISTANCE:
-            return {'x': self.x, 'y': self.y, 'texture': None}
+            return {'type':'Patroller', 'x': self.x, 'y': self.y, 'texture': self.front}
         angle = self.get_rotation_to_player()
         
         if not self.active:
@@ -788,7 +791,7 @@ def loading_screen(text):
     pygame.display.update()
 #endregion
 # Main Loop
-patroller = None
+
 def main():
     global PLAYING, GRID_HEIGHT, GRID_WIDTH, \
         player_x, player_y, player_spawn, world, TIMER, ENERGY_FACTOR,\
@@ -823,7 +826,6 @@ def main():
         loading_screen('Spawning Enemies...')
         SPRITES=[]
         patroller = Patroller()
-        SPRITES.append({'type': 'Patroller', 'x': patroller.x, 'y': patroller.y, 'texture': patroller.front})
 
         loading_screen('Placing Items...')
         spawn_items()
@@ -861,7 +863,7 @@ def main():
                         col = random.choice(glowstick_colors)
                         glowstick_tex = GLOWSTICK_TEXTURE.copy()
                         glowstick_tex.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
-                        SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_tex})
+                        SPRITES.append({'type':'Glowstick', 'x': player_x, 'y': player_y, 'texture': glowstick_tex})
                         last_thrown = 0
 
             if event.type == pygame.WINDOWFOCUSLOST:
@@ -984,7 +986,7 @@ def menu():
                 pygame.mixer.quit()
                 exit(0)
             
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE and PLAYING:
                 main()
 
             start_button.check_event(event)

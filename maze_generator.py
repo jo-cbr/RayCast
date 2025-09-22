@@ -71,8 +71,8 @@ def wilsons_maze(h: int, w: int, random_changes: int = 1):
     height = int(h*0.5)
     width = int(w*0.5)
 
-    grid_h = height * 2
-    grid_w = width * 2
+    grid_h = height * 2 + 1
+    grid_w = width * 2 + 1
 
     maze = np.ones((grid_h, grid_w), dtype=np.uint8)
     unvisited = {(r, c) for r in range(height) for c in range(width)}

@@ -37,6 +37,9 @@ heartbeat_slow = pygame.mixer.Sound('assets/heartbeat_slow.mp3')
 heartbeat_medium = pygame.mixer.Sound('assets/heartbeat_medium.mp3')
 heartbeat_fast = pygame.mixer.Sound('assets/heartbeat_fast.mp3')
 
+item_channel = pygame.mixer.Channel(4)
+gong_sound = pygame.mixer.Sound('assets/gong_sound.mp3')
+
 def handle_random_sounds():
     global random_sound_channel
     rare_sounds = [wind_sound, footsteps_behind, intense_sound, branch_cracking, humming, ghost_sound]

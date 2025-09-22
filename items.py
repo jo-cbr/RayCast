@@ -14,7 +14,7 @@ class Item:
         self.y, self.x = pos
         self.time_passed = 0
         self.ability_used = False
-        self.sprite_dict = {'x': self.x, 'y': self.y, 'texture': self.texture}
+        self.sprite_dict = {'type':'Item', 'x': self.x, 'y': self.y, 'texture': self.texture}
         SPRITES.append(self.sprite_dict)
 
     def get_random_type(self):
@@ -69,7 +69,7 @@ class Item:
             glowstick_tex = GLOWSTICK_TEXTURE.copy()
             color = random.choice(glowstick_colors)
             glowstick_tex.fill(color, special_flags=pygame.BLEND_RGBA_MULT)
-            SPRITES.append({'x': pos[1] + 0.5, 'y': pos[0] + 0.5, 'texture': glowstick_tex})
+            SPRITES.append({'type':'Glowstick', 'x': pos[1] + 0.5, 'y': pos[0] + 0.5, 'texture': glowstick_tex})
 
     def update(self, deltatime):
         if self.ability_used:
@@ -94,6 +94,7 @@ class Item:
             if distance_to_player < 0.1:
                 if self.ability_func is not None:
                     self.ability_func()
+                    item_channel.play(gong_sound)
                     active_buffs.append(self.name)
                     self.ability_used = True
                     if self.sprite_dict in SPRITES:

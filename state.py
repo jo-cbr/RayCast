@@ -4,7 +4,7 @@ from collections import OrderedDict
 pygame.init()
 
 # Size and Screen Setup
-WIDTH, HEIGHT = 800, 450
+WIDTH, HEIGHT = 1920, 1080
 center_y = HEIGHT // 2
 screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=True)
 FPS = 60
@@ -52,7 +52,8 @@ player_view = None
 
 # Camera
 FOV = math.radians(60)
-player_angle = math.radians(0)
+half_fov = FOV * 0.5
+player_angle = math.radians(90)
 cam_pitch = 0
 walk_cycle = 0
 bob_offset_x = bob_offset_y = 0
@@ -87,3 +88,6 @@ def get_cached_column(cache_key, texture, texture_x, target_height):
     return col_surf
 column_cache = OrderedDict()
 CACHE_MAX_SIZE = 4096
+
+# Patroller
+patroller = None
