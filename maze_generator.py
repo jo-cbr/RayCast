@@ -33,65 +33,65 @@ def a_star(maze, startpos, endpos):
         open_nodes.remove(cur_node)
         closed_nodes.add(cur_node)
 
-        # Alle neighbors prüfen und bewerten
-        for neighbor in get_a_star_neighbors(cur_node):
-            if maze[neighbor] == 1 or neighbor in closed_nodes:
+        # Alle neighbours prüfen und bewerten
+        for neighbour in get_a_star_neighbours(cur_node):
+            if maze[neighbour] == 1 or neighbour in closed_nodes:
                 continue
 
             # g score hochzählen, da distanz + 1
             tentative_g = g_score[cur_node] + 1
 
-            if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                came_from[neighbor] = cur_node
-                g_score[neighbor] = tentative_g
-                f_score[neighbor] = evaluate_node(tentative_g, neighbor)
+            if neighbour not in g_score or tentative_g < g_score[neighbour]:
+                came_from[neighbour] = cur_node
+                g_score[neighbour] = tentative_g
+                f_score[neighbour] = evaluate_node(tentative_g, neighbour)
 
-                if neighbor not in open_nodes:
-                    open_nodes.append(neighbor)
+                if neighbour not in open_nodes:
+                    open_nodes.append(neighbour)
 
     return [startpos]
 
 
-def get_a_star_neighbors(rc):
+def get_a_star_neighbours(rc):
     r, c = rc
-    neighbors = []
+    neighbours = []
     if r > 0:
-        neighbors.append((r - 1, c))
+        neighbours.append((r - 1, c))
     if r < grid_h-1:
-        neighbors.append((r + 1, c))
+        neighbours.append((r + 1, c))
     if c > 0:
-        neighbors.append((r, c - 1))
+        neighbours.append((r, c - 1))
     if c < grid_w-1:
-        neighbors.append((r, c + 1))
+        neighbours.append((r, c + 1))
 
-    return neighbors
+    return neighbours
 
 def wilsons_maze(h: int, w: int, random_changes: int = 1):
     global grid_w, grid_h
     height = int(h*0.5)
     width = int(w*0.5)
 
-    grid_h = height * 2 + 1
-    grid_w = width * 2 + 1
+    grid_h = height * 2
+    grid_w = width * 2
 
     maze = np.ones((grid_h, grid_w), dtype=np.uint8)
     unvisited = {(r, c) for r in range(height) for c in range(width)}
 
     def to_grid(rc):
         return rc[0] * 2 + 1, rc[1] * 2 + 1
-    def get_neighbors(rc):
+    def get_neighbours(rc):
         r, c = rc
-        neighbors = []
+        neighbours = []
         if r > 0:
-            neighbors.append((r - 1, c))
+            neighbours.append((r - 1, c))
         if r < height-1:
-            neighbors.append((r + 1, c))
+            neighbours.append((r + 1, c))
         if c > 0:
-            neighbors.append((r, c - 1))
+            neighbours.append((r, c - 1))
         if c < width-1:
-            neighbors.append((r, c + 1))
+            neighbours.append((r, c + 1))
 
-        return neighbors
+        return neighbours
 
     start = random.choice(list(unvisited))
     maze[to_grid(start)] = 0
@@ -103,8 +103,8 @@ def wilsons_maze(h: int, w: int, random_changes: int = 1):
         path = [walk_start]
         while path[-1] in unvisited:
             r, c = path[-1]
-            neighbors = get_neighbors((r, c))
-            next_cell = random.choice(neighbors)
+            neighbours = get_neighbours((r, c))
+            next_cell = random.choice(neighbours)
 
             if next_cell in path:
                 idx = path.index(next_cell)
