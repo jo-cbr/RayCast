@@ -34,23 +34,10 @@ def set_spawn_and_end():
 
     return p1, p2
 
-end_pos, player_spawn = set_spawn_and_end()
-player_y, player_x = player_spawn
-FOV = math.radians(60)
-player_angle = math.radians(0)
-player_energy = 100
-player_speed_mult = 1
-player_view = None
-
-cam_pitch = 0
-walk_cycle = 0
-bob_offset_x = bob_offset_y = 0
-
-PLAYING = False
-
+end_pos, start_pos = set_spawn_and_end()
 TIMER = 0
 
-PROJ_PLANE = (WIDTH / 2) / math.tan(FOV * 0.5)
+PROJ_PLANE = (WIDTH / 2) / math.tan(math.radians(60) * 0.5)
 QUANTIZE_HEIGHT = 4
 RAY_STEP = 8
 BRIGHTNESS_FALLOFF = 2
@@ -78,11 +65,11 @@ def get_cached_column(cache_key, texture, texture_x, target_height):
     return col_surf
 
 #region Draw Funcs
-def draw_scene(screen, h, w, ray_data, timer, player_energy):
+def draw_scene(screen, h, w, ray_data, timer, player):
     screen.fill((0, 0, 0))
-    draw_ray_data(ray_data, h, w)
-    draw_sprites(SPRITES)
-    draw_energy(screen, h, w, player_energy)
+    draw_ray_data(ray_data, h, w, player)
+    draw_sprites(SPRITES, player)
+    draw_energy(screen, h, w, player.energy)
     draw_timer(screen, h, w, timer)
     screen.blit(VIGNETTE_SURF, (0, 0))
 
@@ -103,7 +90,7 @@ def draw_timer(screen, h, w, timer):
     pos = (w//2-timer_rec.get_width()//2, h - 1.2*timer_rec.get_height())
     screen.blit(timer_rec, pos)
 
-def draw_ray_data(ray_data, h, w):
+def draw_ray_data(ray_data, h, w, player):
     textures = {
         1: WALL_TEXTURE,
         2: GOAL_WALL_TEXTURE,
@@ -116,15 +103,15 @@ def draw_ray_data(ray_data, h, w):
     for ray in ray_data:
         wall_height, screen_x, distance, side, grid_value, text_x, wall_pos = ray
         texture = textures[grid_value]
-        result = draw_ray(h, w, int(wall_height), screen_x, distance, side, grid_value, text_x, texture)
+        result = draw_ray(h, w, int(wall_height), screen_x, distance, side, grid_value, text_x, texture, player)
         if result:
             ray_blits.append(result)
 
     if ray_blits:
         screen.blits(ray_blits)
 
-def draw_ray(h, w, wall_height, screen_x, distance, side, grid_value, texture_x, texture):
-    final_x = screen_x + bob_offset_x
+def draw_ray(h, w, wall_height, screen_x, distance, side, grid_value, texture_x, texture, player):
+    final_x = screen_x + player.bob_offset_x
     if not 0 <= final_x < w:
         return
 
@@ -140,12 +127,11 @@ def draw_ray(h, w, wall_height, screen_x, distance, side, grid_value, texture_x,
     
     half_h = target_height // 2
 
-    top_y = int(center_y - half_h + bob_offset_y + cam_pitch)
+    top_y = int(center_y - half_h + player.bob_offset_y + player.cam_pitch)
 
 
     cache_key = (texture_x, target_height, grid_value)
     col_surf = get_cached_column(cache_key, texture, texture_x, target_height)
-
 
     # Helligkeit managen
     norm_distance = distance / MAX_VIEW_DISTANCE
@@ -165,16 +151,14 @@ def draw_ray(h, w, wall_height, screen_x, distance, side, grid_value, texture_x,
 
 SPRITES = []
 
-def draw_sprites(sprites):
+def draw_sprites(sprites, player):
     if len(sprites) == 0:
         return
-    
-    half_fov = FOV*0.5
 
-    dir_x = math.cos(player_angle)
-    dir_y = math.sin(player_angle)
-    plane_x = -dir_y * math.tan(half_fov)
-    plane_y = dir_x * math.tan(half_fov)
+    dir_x = math.cos(player.angle)
+    dir_y = math.sin(player.angle)
+    plane_x = -dir_y * math.tan(player.half_fov)
+    plane_y = dir_x * math.tan(player.half_fov)
 
     det = plane_x * dir_y - dir_x * plane_y
     inv_det = 1 / det
@@ -182,10 +166,10 @@ def draw_sprites(sprites):
     blits = []
 
     # Sprites nach Distanz sortieren
-    sprites.sort(key = lambda s: (s['x']-player_x)**2 + (s['y']-player_y)**2, reverse=True)
+    sprites.sort(key = lambda s: (s['x']-player.x)**2 + (s['y']-player.y)**2, reverse=True)
     for sprite in sprites:
-        sprite_x = sprite['x'] - player_x
-        sprite_y = sprite['y'] - player_y
+        sprite_x = sprite['x'] - player.x
+        sprite_y = sprite['y'] - player.y
 
         texture = sprite['texture']
         texture_width = texture.get_width()
@@ -206,7 +190,7 @@ def draw_sprites(sprites):
         sprite_height = abs(int(texture_height / transform_y))
         sprite_width = abs(int(texture_width / transform_y))
         
-        wall_bottom_y = int(center_y + proj_wall_h//2 + cam_pitch + bob_offset_y)
+        wall_bottom_y = int(center_y + proj_wall_h//2 + player.cam_pitch + player.bob_offset_y)
         if wall_bottom_y - sprite_height > HEIGHT:
             continue
         elif wall_bottom_y + sprite_height < 0:
@@ -234,31 +218,32 @@ def draw_sprites(sprites):
 #endregion
 
 #region Ray Cast Funcs
-def cast_rays():
+def cast_rays(world, raystep, w, player):
     ray_data = []
-    half_fov = FOV * 0.5
-    map_x = int(player_x)
-    map_y = int(player_y)
+    map_x = int(player.x)
+    map_y = int(player.y)
 
     cos_vals = []
     sin_vals = []
     cos_corrections = []
 
-    for idx, i in enumerate(range(0, WIDTH, RAY_STEP)):
-        ray_angle = player_angle - half_fov + (i/WIDTH) * FOV
-        cos_vals.append(math.cos(player_angle - FOV*0.5 + (i/WIDTH) * FOV))
-        sin_vals.append(math.sin(player_angle - FOV*0.5 + (i/WIDTH) * FOV))
-        cos_corrections.append(math.cos(ray_angle - player_angle))
+    cur_size = len(world)-1
 
-    for idx, i in enumerate(range(0, WIDTH, RAY_STEP)):
+    for idx, i in enumerate(range(0, w, raystep)):
+        ray_angle = player.angle - player.half_fov + (i/w) * player.fov
+        cos_vals.append(math.cos(player.angle - player.fov*0.5 + (i/w) * player.fov))
+        sin_vals.append(math.sin(player.angle - player.fov*0.5 + (i/w) * player.fov))
+        cos_corrections.append(math.cos(ray_angle - player.angle))
+
+    for idx, i in enumerate(range(0, w, raystep)):
         dir_x = cos_vals[idx]
         dir_y = sin_vals[idx]
         cos_correction = cos_corrections[idx]
-        data = cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction)
+        data = cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction, player, world, cur_size)
         ray_data.append(data)
     return ray_data
 
-def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
+def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction, player, world, cur_size = len(world)-1):
     global Z_BUFFER
     # Strecke pro Spalte
     delta_distance_x = abs(1 / dir_x) if dir_x != 0 else 1e30
@@ -268,17 +253,17 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
 
     # Entfernung zur nähsten Spalte
     if dir_x < 0: # nächster schnittpunkt liegt rechts
-        side_dist_x = (player_x - map_x) * delta_distance_x
+        side_dist_x = (player.x - map_x) * delta_distance_x
         step_x = -1
     else: # links
-        side_dist_x = (map_x + 1 - player_x) * delta_distance_x
+        side_dist_x = (map_x + 1 - player.x) * delta_distance_x
         step_x = 1
     if dir_y < 0:
         step_y = -1
-        side_dist_y = (player_y - map_y) * delta_distance_y
+        side_dist_y = (player.y - map_y) * delta_distance_y
     else:
         step_y = 1
-        side_dist_y = (map_y + 1.0 - player_y) * delta_distance_y
+        side_dist_y = (map_y + 1.0 - player.y) * delta_distance_y
 
     hit = False
     grid_value = 1
@@ -304,11 +289,12 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
             raw_dist = (side_dist_x - delta_distance_x + side_dist_y - delta_distance_y) / 2
 
 
+        grid_value = world[map_y][map_x]
+
         if map_x < 0 or map_y < 0 or map_x >= cur_size or map_y >= cur_size:
             raw_dist = min(raw_dist, MAX_DISTANCE)
             break
 
-        grid_value = world[map_y, map_x]
         if 0 <= map_x < cur_size and 0 <= map_y < cur_size:
             if grid_value != 0:
                 hit = True
@@ -319,9 +305,9 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
 
     perp_distance = max(raw_dist * cos_correction, 0.01)
     if side == 0:
-        wall_coord = player_y + raw_dist * dir_y
+        wall_coord = player.y + raw_dist * dir_y
     else:
-        wall_coord = player_x + raw_dist * dir_x
+        wall_coord = player.x + raw_dist * dir_x
 
     wall_coord -= math.floor(wall_coord)
 
@@ -340,174 +326,184 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
 
     return wall_height, i, perp_distance, side, grid_value, text_x, wall_pos
 #endregion
+#region PlayerController
+class PlayerController:
+    def __init__(self, world, spawn, screen_h, screen_w, footstep_channel, exhausted_channel):
+        self.world = world
+        self.sh = screen_h
+        self.sw = screen_w
 
-#region Player Controller Funcs
-ENERGY_FACTOR = 1
-def player_controller(delta_time):
-    # Alle globalen vars die gebraucht werden
-    global player_x, player_y, player_angle, player_spawn, \
-            cam_pitch, center_y, FOV, player_energy, PLAYING, \
-            walk_cycle, bob_offset_y, bob_offset_x, \
-            exhausted_played, player_speed_mult
+        self.spawnpos = spawn
+        self.y, self.x = self.spawnpos[0] + 0.5, self.spawnpos[1] + 0.5
 
-    next_x, next_y = player_x, player_y
-    move_speed = 1
-    strafe_speed = 0.75
-    rot_speed = 45
-    energy_loss_factor = 12 * ENERGY_FACTOR
-    energy_gain_factor = 5
+        self.fov = math.radians(60)
+        self.base_fov = self.fov
+        self.half_fov = self.fov / 2
+        self.min_fov = self.fov * 0.95
+        self.dynamic_fov_mult = 0.5
 
-    moving = False
+        self.angle = math.radians(0)
+        self.move_speed = 1
+        self.strafe_speed = 0.75
+        self.rot_speed = 45
 
-    base_fov = math.radians(60)
-    min_fov = base_fov*0.95 # Beim Sprint base_fov -> min_fov
-    dyn_fov_mult = 0.5 # Glättet verlauf der FOV
+        self.energy = 100
+        self.energy_loss_factor = 12 * max(128/(len(self.world)-1), 4)
+        self.energy_gain_factor = 5
 
-    view_bob_frequency = 5 # staucht die Sinuswelle
-    view_bob_amplitude = 5 # Stärkefaktor
+        self.bob_offset_x = self.bob_offset_y = 0
+        self.view_bob_frequency = 1
+        self.view_bob_amplitude = 1
 
-    forward = 0
-    strafe = 0
+        self.cam_pitch = 0
 
-    if pygame.event.get_grab():
-        mouse_x, mouse_y = pygame.mouse.get_rel()
-        if mouse_x != 0:
-            norm_mouse_x = mouse_x/WIDTH
-            player_angle += norm_mouse_x * rot_speed * delta_time
-        if mouse_y != 0:
-            cam_pitch -= mouse_y * rot_speed * delta_time
-            cam_pitch = min(max(cam_pitch, -HEIGHT), HEIGHT)
+        self.footstep_channel = footstep_channel
+        self.exhausted_channel = exhausted_channel
 
-        if pygame.mouse.get_just_released()[0]:
-            dir_x = math.cos(player_angle)
-            dir_y = math.sin(player_angle)
-            result = cast_single_ray(int(WIDTH*0.5), FOV*0.5,int(player_x), int(player_y), dir_x, dir_y)
-            if result[4] == 2 and result[2] <= 1.5:
-                PLAYING = False
-                menu()
-            if result[4] == 4 and result[2] <= 1.5:
-                world[result[6]] = 5
-                player_spawn = int(player_x) + 0.5, int(player_y) + 0.5
+    def update(self, deltatime):
+        next_x, next_y = self.x, self.y
+        forward = strafe = 0
+        walk_cycle = 0
+        moving = False
 
-    if forward < 1.5 and player_energy < 100:
-        player_energy += energy_gain_factor * delta_time
-        player_energy = min(player_energy, 100)
+        if pygame.event.get_grab():
+            mouse_x, mouse_y = pygame.mouse.get_rel()
+            if mouse_x != 0:
+                norm_mouse_x = mouse_x/self.sw
+                self.angle += norm_mouse_x * self.rot_speed * deltatime
+            if mouse_y != 0:
+                self.cam_pitch -= mouse_y * self.rot_speed * deltatime
+                self.cam_pitch = min(max(self.cam_pitch, -self.sh), self.sh)
 
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_w]:
-        if keys[pygame.K_LSHIFT]:
-            forward = 0.75
-        elif keys[pygame.K_LCTRL] and not player_sound_channel.get_busy():
-            if player_energy > 0:
-                forward = 2
-                player_energy -= energy_loss_factor * delta_time
-                if player_energy <= 0:
-                    player_energy = 0
-                    player_sound_channel.play(exhausted)
-                    exhausted_played = True
-            if FOV > min_fov:
-                FOV -= (FOV - min_fov) * dyn_fov_mult * delta_time
+            if pygame.mouse.get_just_released()[0]:
+                dir_x = math.cos(self.angle)
+                dir_y = math.sin(self.angle)
+                cos_correction = math.cos(0)
+                result = cast_single_ray(int(self.sw*0.5),int(self.x), int(self.y), dir_x, dir_y, cos_correction, self, self.world, len(self.world)-1)
+                if result[4] == 2 and result[2] <= 1.5:
+                    menu(False)
+                if result[4] == 4 and result[2] <= 1.5:
+                    world[result[6]] = 5
+                    self.spawnpos = int(self.x) + 0.5, int(self.y) + 0.5
+
+        if forward < 1.5 and self.energy < 100:
+            self.energy += self.energy_gain_factor * deltatime
+            self.energy = min(self.energy, 100)
+
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_w]:
+            if keys[pygame.K_LSHIFT]:
+                forward = 0.75
+            elif keys[pygame.K_LCTRL] and not self.exhausted_channel.get_busy():
+                if self.energy > 0:
+                    forward = 2
+                    self.energy -= self.energy_loss_factor * deltatime
+                    if self.energy <= 0:
+                        self.energy = 0
+                        self.exhausted_channel.play(exhausted)
+                if self.fov > self.min_fov:
+                    self.fov -= (self.fov - self.min_fov) * self.dynamic_fov_mult * deltatime
+            else:
+                if self.fov < self.base_fov:
+                    self.fov += (self.base_fov - self.fov) * self.dynamic_fov_mult * deltatime
+                forward = 1
+
+        if keys[pygame.K_s]:
+            forward = -0.5
+        if keys[pygame.K_a]:
+            strafe = -1
+        if keys[pygame.K_d]:
+            strafe = 1
+
+        next_x += math.cos(self.angle) * self.move_speed * forward * deltatime
+        next_y += math.sin(self.angle) * self.move_speed * forward * deltatime
+        next_x += -math.sin(self.angle) * self.strafe_speed * strafe * deltatime
+        next_y += math.cos(self.angle) * self.strafe_speed * strafe * deltatime
+
+        # Potentielle Distanz berechnen. Wird verworfen falls is_empty() auf False läuft
+        distance = (next_x - self.x)**2 + (next_y - self.y)**2
+
+        if next_x != self.x:
+            if self.check_distance_to_wall(next_x, self.y):
+                if self.is_empty(next_x, self.y):
+                    self.x = next_x
+                    moving = True
+        if next_y != self.y:
+            if self.check_distance_to_wall(self.x, next_y):
+                if self.is_empty(self.x, next_y):
+                    self.y = next_y
+                    moving = True
+
+        if distance > 0 and moving:
+            walk_cycle += distance
+            walk_cycle %= math.pi*2
         else:
-            if FOV < base_fov:
-                FOV += (base_fov - FOV) * dyn_fov_mult * delta_time
-            forward = 1
+            walk_cycle -= 0.25
+            walk_cycle = max(walk_cycle, 0)
 
-    if keys[pygame.K_s]:
-        forward = -0.5
-    if keys[pygame.K_a]:
-        strafe = -1
-    if keys[pygame.K_d]:
-        strafe = 1
+        self.bob_offset_x = math.cos(walk_cycle * self.view_bob_frequency) * self.view_bob_amplitude * forward
+        self.bob_offset_y = self.view_bob_frequency * math.sin(walk_cycle * self.view_bob_frequency) * self.view_bob_amplitude * forward
 
-    next_x += math.cos(player_angle) * move_speed * forward * delta_time * player_speed_mult
-    next_y += math.sin(player_angle) * move_speed * forward * delta_time * player_speed_mult
-    next_x += -math.sin(player_angle) * strafe_speed * strafe * delta_time * player_speed_mult
-    next_y += math.cos(player_angle) * strafe_speed * strafe * delta_time * player_speed_mult
+        if moving and not self.footstep_channel.get_busy():
+            s = self.footstep_channel.get_sound()
+            if forward == 1.5:
+                if s != footstep_sprint:
+                    self.footstep_channel.stop()
+                self.footstep_channel.play(footstep_sprint)
+            elif forward >= 1:
+                if s != footstep_reg:
+                    self.footstep_channel.stop()
+                self.footstep_channel.play(footstep_reg)
+        elif not moving and self.footstep_channel.get_busy():
+            self.footstep_channel.fadeout(100)
+            self.footstep_channel.stop()
 
-    # Potentielle Distanz berechnen. Wird verworfen falls is_empty() auf False läuft
-    distance = (next_x - player_x)**2 + (next_y - player_y)**2
+    def check_distance_to_wall(self, px, py, margin = 0.15):
+        gx, gy = int(px), int(py)
+        if not (0 <= gy < len(world) and 0 <= gx < len(world[0])):
+            return False
+        if world[gy, gx] != 0:
+            return False
 
-    if next_x != player_x:
-        if check_distance_to_wall(next_x, player_y):
-            if is_empty(next_x, player_y):
-                player_x = next_x
-                moving = True
-    if next_y != player_y:
-        if check_distance_to_wall(player_x, next_y):
-            if is_empty(player_x, next_y):
-                player_y = next_y
-                moving = True
+        dx = px - gx
+        dy = py - gy
 
-    if distance > 0 and moving:
-        walk_cycle += distance
-        walk_cycle %= math.pi*2
-    else:
-        walk_cycle -= 0.25
-        walk_cycle = max(walk_cycle, 0)
+        # orthogonal
+        neighbors = [
+            (gx - 1, gy, dx),      # links
+            (gx + 1, gy, 1 - dx),  # rechts
+            (gx, gy - 1, dy),      # oben
+            (gx, gy + 1, 1 - dy),  # unten
+        ]
+        for nx, ny, dist_frac in neighbors:
+            if 0 <= ny < len(world) and 0 <= nx < len(world[0]):
+                if world[ny][nx] != 0 and dist_frac < margin:
+                    return False
+        # diagonal
+        diagonals = [
+            (gx - 1, gy - 1, max(dx, dy)),          # oben links
+            (gx + 1, gy - 1, max(1 - dx, dy)),      # oben rechts
+            (gx - 1, gy + 1, max(dx, 1 - dy)),      # unten links
+            (gx + 1, gy + 1, max(1 - dx, 1 - dy)),  # unten rechts
+        ]
+        for nx, ny, dist_frac in diagonals:
+            if 0 <= ny < len(world) and 0 <= nx < len(world[0]):
+                if world[ny][nx] != 0 and dist_frac < margin:
+                    return False
 
-    bob_offset_x = math.cos(walk_cycle * view_bob_frequency) * view_bob_amplitude * forward
-    bob_offset_y = view_bob_frequency * math.sin(walk_cycle * view_bob_frequency) * view_bob_amplitude * forward
+        return True
 
-    if moving and not footstep_channel.get_busy():
-        q = footstep_channel.get_queue()
-        if forward == 1.5:
-            if q != footstep_sprint:
-                footstep_channel.stop()
-            footstep_channel.play(footstep_sprint)
-        elif forward >= 1:
-            if q != footstep_reg:
-                footstep_channel.stop()
-            footstep_channel.play(footstep_reg)
-    elif not moving and footstep_channel.get_busy():
-        footstep_channel.fadeout(50)
-        footstep_channel.stop()
-
-def check_distance_to_wall(px, py, margin = 0.15):
-    gx, gy = int(px), int(py)
-    if not (0 <= gy < len(world) and 0 <= gx < len(world[0])):
+    def is_empty(self, px, py):
+        grid_x = int(px)
+        grid_y = int(py)
+        if 0 <= grid_y < len(world) and 0 <= grid_x < len(world[0]):
+            return world[grid_y][grid_x] == 0
         return False
-    if world[gy, gx] != 0:
-        return False
-
-    dx = px - gx
-    dy = py - gy
-
-    # orthogonal
-    neighbors = [
-        (gx - 1, gy, dx),      # links
-        (gx + 1, gy, 1 - dx),  # rechts
-        (gx, gy - 1, dy),      # oben
-        (gx, gy + 1, 1 - dy),  # unten
-    ]
-    for nx, ny, dist_frac in neighbors:
-        if 0 <= ny < len(world) and 0 <= nx < len(world[0]):
-            if world[ny][nx] != 0 and dist_frac < margin:
-                return False
-    # diagonal
-    diagonals = [
-        (gx - 1, gy - 1, max(dx, dy)),          # oben links
-        (gx + 1, gy - 1, max(1 - dx, dy)),      # oben rechts
-        (gx - 1, gy + 1, max(dx, 1 - dy)),      # unten links
-        (gx + 1, gy + 1, max(1 - dx, 1 - dy)),  # unten rechts
-    ]
-    for nx, ny, dist_frac in diagonals:
-        if 0 <= ny < len(world) and 0 <= nx < len(world[0]):
-            if world[ny][nx] != 0 and dist_frac < margin:
-                return False
-
-    return True
-
-def is_empty(x, y):
-    grid_x = int(x)
-    grid_y = int(y)
-    if 0 <= grid_y < len(world) and 0 <= grid_x < len(world[0]):
-        return world[grid_y][grid_x] == 0
-    return False
 #endregion
-
 #region Patrolling Enemy
 class Patroller:
-    def __init__(self):
+    def __init__(self, world):
+        self.world = world
         self.y, self.x = self.get_start_pos()
         self.dx, self.dy = 0,0
         self.mode = 'Patrolling'
@@ -532,10 +528,10 @@ class Patroller:
         self.active = True        
 
     def get_start_pos(self) -> tuple[int, int]:
-        height = width = len(world)-1
+        height = width = len(self.world)-1
         spawns = []
         for y in range(height-1):
-            if world[y][width-2] == 0:
+            if self.world[y][width-2] == 0:
                 spawns.append((y, width-2))
 
         spawn = random.choice(spawns)
@@ -554,24 +550,24 @@ class Patroller:
         dy, dx = self.get_direction_vector(left_dir)
         ty, tx = int(self.y) + dy, int(self.x) + dx
 
-        if world[ty, tx] == 0:
+        if self.world[ty, tx] == 0:
             return [(ty, tx)]
         
         dy, dx = self.get_direction_vector(self.cur_dir)
         ty, tx = int(self.y) + dy, int(self.x) + dx
-        if world[ty, tx] == 0:
+        if self.world[ty, tx] == 0:
             return [(ty, tx)]
         
         right_dir = self.directions[(idx + 3) % 4]
         dy, dx = self.get_direction_vector(right_dir)
         ty, tx = int(self.y) + dy, int(self.x) + dx
-        if world[ty, tx] == 0:
+        if self.world[ty, tx] == 0:
             return [(ty, tx)]
         
         back_dir = self.directions[(idx + 2) % 4]
         dy, dx = self.get_direction_vector(back_dir)
         ty, tx = int(self.y) + dy, int(self.x) + dx
-        if world[ty, tx] == 0:
+        if self.world[ty, tx] == 0:
             return [(ty, tx)]
 
     def has_line_of_sight(self, x0, y0, x1, y1, grid):
@@ -599,9 +595,9 @@ class Patroller:
                 y0 += sy
         return True
 
-    def can_see_player(self):
-        dx = player_x - self.x
-        dy = player_y - self.y
+    def can_see_player(self, player):
+        dx = player.x - self.x
+        dy = player.y - self.y
         dist = math.sqrt(dx ** 2 + dy ** 2)
         if dist > self.view_distance:
             return False
@@ -613,7 +609,7 @@ class Patroller:
         if angle > self.view_angle:
             return False
 
-        if not self.has_line_of_sight(self.x, self.y, player_x, player_y, world):
+        if not self.has_line_of_sight(self.x, self.y, player.x, player.y, self.world):
             return False
 
     def move_and_collide(self, deltatime):
@@ -630,7 +626,7 @@ class Patroller:
             (int(self.y + radius), int(new_x - radius)),
             (int(self.y + radius), int(new_x + radius)),
         ]
-        if all(0 <= cy < len(world) and 0 <= cx < len(world[0]) and world[cy][cx] == 0 for cy, cx in cells_x):
+        if all(0 <= cy < len(self.world) and 0 <= cx < len(self.world[0]) and self.world[cy][cx] == 0 for cy, cx in cells_x):
             self.x = new_x
         else:
             step_x = 0
@@ -641,7 +637,7 @@ class Patroller:
             (int(new_y + radius), int(self.x - radius)),
             (int(new_y + radius), int(self.x + radius)),
         ]
-        if all(len(world) > cy >= 0 == world[cy][cx] and 0 <= cx < len(world[0]) for cy, cx in cells_y):
+        if all(len(self.world) > cy >= 0 == self.world[cy][cx] and 0 <= cx < len(self.world[0]) for cy, cx in cells_y):
             self.y = new_y
         else:
             step_y = 0
@@ -669,15 +665,14 @@ class Patroller:
             if not heartbeat_channel.get_busy():
                 heartbeat_channel.play(sound)
 
-    def update(self, deltatime):
-        global player_x, player_y
-        self.distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
+    def update(self, deltatime, player):
+        self.distance_to_player = math.sqrt((player.x-self.x) ** 2 + (player.y-self.y) ** 2)
         if self.distance_to_player <= MAX_VIEW_DISTANCE:
-            draw_sprites([self.as_sprite()])
+            draw_sprites([self.as_sprite()], player)
         if not self.active:
             return
         if self.distance_to_player < 8:
-            path_to_player = a_star(world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
+            path_to_player = a_star(self.world, (int(self.y), int(self.x)), (int(player.y), int(player.x)))
         else:
             path_to_player = []
         close_to_player = False
@@ -687,7 +682,7 @@ class Patroller:
             random_sound_channel.play(death_sound)
             heartbeat_channel.fadeout(50)
             self.y, self.x = self.get_start_pos()
-            player_y, player_x = player_spawn
+            player.y, player.x = player.spawnpos
 
         # Fallback
         if path_to_player is None:
@@ -698,25 +693,25 @@ class Patroller:
                 self.current_path = self.get_target_pos()
             if self.distance_to_player < 8:
                 # Spieler kann gehört werden wenn zu nah, len statt distance sodass es nicht durch wände geht
-                if self.can_see_player() or 0 < (len(path_to_player) < 5 and footstep_channel.get_busy()):
+                if self.can_see_player(player) or 0 < (len(path_to_player) < 5 and footstep_channel.get_busy()):
                     self.mode = 'Chasing'
-                    self.player_seen_pos = (int(player_y), int(player_x))
-                    self.current_path = a_star(world, (int(self.y), int(self.x)), self.player_seen_pos)
+                    self.player_seen_pos = (int(player.y), int(player.x))
+                    self.current_path = a_star(self.world, (int(self.y), int(self.x)), self.player_seen_pos)
                     self.view_angle = math.pi/3
 
         if self.mode == 'Chasing':
-            self.player_seen_pos = (int(player_y), int(player_x))
+            self.player_seen_pos = (int(player.y), int(player.x))
             if len(path_to_player) > 1:
                 path_to_player.pop(0)
 
             # Logik für verschiedene Szenarien
-            if self.distance_to_player > self.view_distance or (self.distance_to_player > self.view_distance/2 and not self.can_see_player()):
+            if self.distance_to_player > self.view_distance or (self.distance_to_player > self.view_distance/2 and not self.can_see_player(player)):
                 self.mode = 'Patrolling'
                 self.view_angle = math.pi/4
-            if self.can_see_player():
+            if self.can_see_player(player):
                 if self.distance_to_player < 2:
                     close_to_player = True
-                    self.current_path = [(player_y, player_x)]
+                    self.current_path = [(player.y, player.x)]
                 else:
                     self.current_path = path_to_player
             elif self.distance_to_player < 2:
@@ -758,8 +753,8 @@ class Patroller:
             self.heartbeat_sound(self.distance_to_player, self.mode=='Chasing')
 
     def get_rotation_to_player(self):
-        dx_to_player = player_x - self.x
-        dy_to_player = player_y - self.y
+        dx_to_player = player.x - self.x
+        dy_to_player = player.y - self.y
 
         vector_to_player = (dx_to_player, dy_to_player)
         direction_vector = (self.dx, self.dy)
@@ -801,7 +796,6 @@ class Patroller:
 
         return {'x': self.x, 'y': self.y, 'texture': final_text}
 #endregion
-
 #region Items
 ITEMS = []
 BUFFS = []
@@ -848,14 +842,14 @@ class Item:
         patroller.active = True
 
     def speed_up_player(self):
-        global player_speed_mult
-        player_speed_mult = 1.25
+        global player
+        player.move_speed = 1.25
     def slow_down_player(self):
-        global player_speed_mult
-        player_speed_mult = 1
+        global player
+        player.move_speed = 1
 
     def show_path(self):
-        path = a_star(world, (int(player_y), int(player_x)), end_pos)
+        path = a_star(world, (int(player.y), int(player.x)), end_pos)
         shown_path = path[1:6]
         for pos in shown_path:
             glowstick_tex = GLOWSTICK_TEXTURE.copy()
@@ -874,7 +868,7 @@ class Item:
                 ITEMS.remove(self)
             return
         else:
-            distance_to_player = (player_x-self.x) ** 2 + (player_y-self.y) ** 2
+            distance_to_player = (player.x-self.x) ** 2 + (player.y-self.y) ** 2
             if distance_to_player > 1:
                 return
             
@@ -904,7 +898,6 @@ def spawn_items():
             item = Item(item_pos)
             ITEMS.append(item)
 #endregion
-
 #region Worldgeneration
 def place_checkpoints(start, end):
     empty_cells = [(y, x) for y in range(cur_size) for x in range(cur_size) if world[y, x] == 0]
@@ -935,7 +928,7 @@ def place_checkpoints(start, end):
         world[cur_best] = 4
 
 def create_world():
-    global world, player_y, player_x, cur_size, cur_size, cur_size
+    global world, cur_size
     cur_size += 16
     cur_size %= 144
     cur_size = max(cur_size, 16)
@@ -953,11 +946,12 @@ def loading_screen(text):
     pygame.display.update()
 #endregion
 # Main Loop
-patroller = None
-def main():
-    global cam_pitch, player_view, PLAYING, cur_size, cur_size, \
-        player_x, player_y, player_spawn, world, TIMER, SPRITES, ENERGY_FACTOR,\
-        patroller, end_pos
+patroller = Patroller(world)
+player = PlayerController(world, start_pos, HEIGHT, WIDTH, footstep_channel, player_sound_channel)
+
+def main(new_game):
+    global cur_size, world, TIMER, SPRITES, patroller, end_pos, player
+    
     mouse_visible = False
     mouse_grab = True
     pygame.mouse.set_visible(mouse_visible)
@@ -967,7 +961,7 @@ def main():
     last_thrown = 1.0
     
     # World Creation and Setup
-    if not PLAYING:
+    if new_game:
         TIMER = 0
         while True:
             loading_screen('Generating Maze...')
@@ -987,25 +981,22 @@ def main():
 
         SPRITES=[]
         loading_screen('Spawning Enemies...')
-        patroller = Patroller()
+        patroller = Patroller(world)
 
         loading_screen('Placing Items...')
         spawn_items()
 
-        player_spawn = player_y, player_x = start_pos[0] + 0.5, start_pos[1] + 0.5
-
-        ENERGY_FACTOR = max(128/cur_size, 4)
-        PLAYING = True
+        player = PlayerController(world, start_pos, HEIGHT, WIDTH, footstep_channel, player_sound_channel)
 
     # Fallback
     if patroller is None:
-        patroller = Patroller()
+        patroller = Patroller(world)
 
     clock.tick(FPS)
     while True:
         dt_ms = clock.tick(FPS)
-        delta_time = dt_ms * 0.001
-        TIMER += delta_time
+        deltatime = dt_ms * 0.001
+        TIMER += deltatime
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1014,7 +1005,7 @@ def main():
                 exit(0)
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    menu()
+                    menu(True)
                     mouse_visible = not mouse_visible
                     mouse_grab = not mouse_grab
                     pygame.mouse.set_visible(mouse_visible)
@@ -1025,27 +1016,27 @@ def main():
                         col = random.choice(glowstick_colors)
                         glowstick_tex = GLOWSTICK_TEXTURE.copy()
                         glowstick_tex.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
-                        SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_tex})
+                        SPRITES.append({'x': player.x, 'y': player.y, 'texture': glowstick_tex})
                         last_thrown = 0
 
             if event.type == pygame.WINDOWFOCUSLOST:
-                menu()
+                menu(True)
                 mouse_visible = not mouse_visible
                 mouse_grab = not mouse_grab
                 pygame.mouse.set_visible(mouse_visible)
                 pygame.event.set_grab(mouse_grab)
 
         handle_random_sounds()
-        ray_data = cast_rays()
-        draw_scene(screen, HEIGHT, WIDTH, ray_data, TIMER, player_energy)
-        player_controller(delta_time)
+        ray_data = cast_rays(world, RAY_STEP, WIDTH, player)
+        draw_scene(screen, HEIGHT, WIDTH, ray_data, TIMER, player)
+        player.update(deltatime)
 
-        patroller.update(delta_time)
+        patroller.update(deltatime, player)
         for i in ITEMS:
-            i.update(delta_time)
+            i.update(deltatime)
 
         if last_thrown < glowstick_cooldown:
-            last_thrown += delta_time
+            last_thrown += deltatime
         
         pygame.display.update()
 
@@ -1057,15 +1048,13 @@ def quit_func():
         pygame.mixer.quit()
         exit(0)
     else:
-        PLAYING = False
-        menu()
+        menu(False)
 
 def respawn_func():
-    global player_x, player_y
-    player_x, player_y = player_spawn
-    main()
+    player.x, player.y = player.spawnpos
+    main(False)
 
-def menu():
+def menu(playing):
     global WIDTH, HEIGHT
     heartbeat_channel.stop()
 
@@ -1080,15 +1069,16 @@ def menu():
     hover_sound.set_volume(0.25)
 
     start_button_args = {
-        'text': 'PLAY' if not PLAYING else 'CONTINUE',
+        'text': 'PLAY' if not playing else 'CONTINUE',
         'font': button_font,
         'call_on_release': True,
         'hover_color': hover_color,
         'click_sound': click_sound,
         'hover_sound': hover_sound,
     }
+    start_new_game = lambda: main(True)
     start_button_rect = pygame.Rect(int(WIDTH*0.5-196), 128, 392, 128)
-    start_button = Button(start_button_rect, color, main, **start_button_args)
+    start_button = Button(start_button_rect, color, start_new_game, **start_button_args)
     start_button.rect.center = (int(WIDTH*0.5), int(HEIGHT*0.4))
     
     size_button_args = {
@@ -1116,7 +1106,7 @@ def menu():
     respawn_button.rect.center = (int(WIDTH*0.5), int(HEIGHT*0.6))
 
     quit_button_args = {
-        'text': 'QUIT' if not PLAYING else 'MAIN MENU',
+        'text': 'QUIT' if not playing else 'MAIN MENU',
         'font': button_font,
         'call_on_release': True,
         'hover_color': hover_color,
@@ -1137,12 +1127,12 @@ def menu():
     pygame.event.set_grab(False)
 
     while True:
-        if not PLAYING:
+        if not playing:
             screen.blit(pygame.transform.scale(BG_IMAGE, screen.get_size()), (0, 0))
         else:
 
-            ray_data = cast_rays()
-            draw_scene(screen, HEIGHT, WIDTH, ray_data, TIMER, player_energy)
+            ray_data = cast_rays(world, RAY_STEP, WIDTH, player)
+            draw_scene(screen, HEIGHT, WIDTH, ray_data, TIMER, player)
         screen.blit(menu_text, (int(WIDTH*0.5 - menu_text.get_width()*0.5), 64))
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1151,16 +1141,16 @@ def menu():
                 exit(0)
             
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                main()
+                main(False)
 
             start_button.check_event(event)
-            if PLAYING:
+            if playing:
                 respawn_button.check_event(event)
             else: size_button.check_event(event)
             quit_button.check_event(event)
 
         start_button.update(screen)
-        if PLAYING:
+        if playing:
             respawn_button.update(screen)
         else:
             size_button.text = button_font.render(f'SIZE {cur_size}', True, pygame.Color("white"))
@@ -1171,4 +1161,4 @@ def menu():
 
 #endregion
 
-menu()
+menu(False)
