@@ -1,36 +1,17 @@
-import pygame, math, random, cProfile
+import pygame, math
 from pygame_button import Button
 from maze_generator import *
 from collections import OrderedDict
+from assets import *
 
 pygame.init()
-pygame.mixer.init()
-
 clock = pygame.time.Clock()
 FPS = 60
 
-GRID_WIDTH = 32
-GRID_HEIGHT = 32
-world = wilsons_maze(GRID_HEIGHT, GRID_HEIGHT, 6)
 cur_size = 32
+world = wilsons_maze(cur_size, cur_size, 6)
 
-MAX_DISTANCE = 32
-MAX_VIEW_DISTANCE = 8
-
-WIDTH, HEIGHT = 1920, 1080
-screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=True)
-center_y = HEIGHT // 2
-
-FOV = math.radians(60)
-player_angle = math.radians(0)
-
-cam_pitch = 0
-walk_cycle = 0
-bob_offset_x = bob_offset_y = 0
-
-Z_BUFFER = [0.0] * WIDTH
 def set_spawn_and_end():
-
     height, width = len(world), len(world[0])
 
     # Sucht Sackgassen am rechten Rand (Prüfung ob nur ein Weg hin Möglich)
@@ -55,87 +36,31 @@ def set_spawn_and_end():
 
 end_pos, player_spawn = set_spawn_and_end()
 player_y, player_x = player_spawn
-
+FOV = math.radians(60)
+player_angle = math.radians(0)
 player_energy = 100
 player_speed_mult = 1
 player_view = None
+
+cam_pitch = 0
+walk_cycle = 0
+bob_offset_x = bob_offset_y = 0
+
 PLAYING = False
 
 TIMER = 0
 
-#region Soundeffects
-background_channel = pygame.mixer.Channel(0)
-
-background_sound = pygame.mixer.Sound('assets/background_sound.mp3')
-background_sound.set_volume(0.1)
-
-footstep_channel = pygame.mixer.Channel(1)
-footstep_channel.set_volume(0.1)
-
-footstep_reg = pygame.mixer.Sound('assets/footsteps_reg.mp3')
-footstep_reg.set_volume(0.1)
-footstep_sprint = pygame.mixer.Sound('assets/footsteps_sprint.mp3')
-footstep_sprint.set_volume(0.2)
-exhausted = pygame.mixer.Sound('assets/exhausted.mp3')
-exhausted.set_volume(2)
-
-random_sound_channel = pygame.mixer.Channel(2)
-random_sound_channel.set_source_location(180, 5)
-wind_sound = pygame.mixer.Sound('assets/wind_sound.mp3')
-wind_sound.set_volume(1.1)
-intense_sound = pygame.mixer.Sound('assets/intense_suspense.mp3')
-intense_sound.set_volume(0.2)
-footsteps_behind = pygame.mixer.Sound('assets/footsteps_behind.mp3')
-humming = pygame.mixer.Sound('assets/humming.mp3')
-ghost_sound = pygame.mixer.Sound('assets/ghost_sound.mp3')
-branch_cracking = pygame.mixer.Sound('assets/cracking_sound.mp3')
-branch_cracking.set_volume(0.8)
-death_sound = pygame.mixer.Sound('assets/death_beep.mp3')
-death_sound.set_volume(0.7)
-
-heartbeat_channel = pygame.mixer.Channel(3)
-heartbeat_slow = pygame.mixer.Sound('assets/heartbeat_slow.mp3')
-heartbeat_medium = pygame.mixer.Sound('assets/heartbeat_medium.mp3')
-heartbeat_fast = pygame.mixer.Sound('assets/heartbeat_fast.mp3')
-
-def handle_random_sounds():
-    global random_sound_channel
-    rare_sounds = [wind_sound, footsteps_behind, intense_sound, branch_cracking, humming, ghost_sound]
-    if random.random() > 0.9999 and not random_sound_channel.get_busy():
-        random_sound_channel.play(random.choice(rare_sounds))
-
-#endregion
 PROJ_PLANE = (WIDTH / 2) / math.tan(FOV * 0.5)
+QUANTIZE_HEIGHT = 4
+RAY_STEP = 8
+BRIGHTNESS_FALLOFF = 2
+Z_BUFFER = [0.0] * WIDTH
+MAX_DISTANCE = 32
+MAX_VIEW_DISTANCE = 8
 
-#region Textures
-BG_IMAGE = pygame.image.load('assets/main_background.png').convert()
-
-WALL_TEXTURE = pygame.image.load('assets/bushwall.png').convert()
-CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/checkpoint_wall.png').convert()
-SAVED_CHECKPOINT_WALL_TEXTURE = pygame.image.load('assets/saved_checkpoint_wall.png').convert()
-GOAL_WALL_TEXTURE = pygame.image.load('assets/goal_wall.png').convert()
-
-WALL_TEXTURE_WIDTH, WALL_TEXTURE_HEIGHT = WALL_TEXTURE.get_size()
-
-VIGNETTE_SURF = pygame.image.load('assets/vignette.png').convert_alpha()
-VIGNETTE_SURF = pygame.transform.scale(VIGNETTE_SURF, screen.get_size()).convert_alpha()
-
-GLOWSTICK_TEXTURE = pygame.transform.scale_by(pygame.image.load('assets/glowstick.png').convert_alpha(), 16)
-glowstick_colors = [
-    (255, 0, 0), (0, 255, 0),
-    (0, 0, 255), (255, 255, 0),
-    (0, 255, 255), (255, 0, 255), 
-    (255, 200, 0), (128, 0, 255)
-]
-
-TORCH_TEXTURE = pygame.image.load('assets/items/torch.png').convert_alpha()
-CRYSTAL_BALL_TEXTURE = pygame.image.load('assets/items/crystal_ball.png').convert_alpha()
-CROSS_TEXTURE = pygame.image.load('assets/items/jesus_cross.png').convert_alpha()
-SPEED_BOOST_TEXTURE = pygame.image.load('assets/items/sprint_boost.png').convert_alpha()
-
-#endregion
 column_cache = OrderedDict()
 CACHE_MAX_SIZE = 4096
+
 def get_cached_column(cache_key, texture, texture_x, target_height):
     col_surf = column_cache.get(cache_key)
     if col_surf is not None:
@@ -152,40 +77,33 @@ def get_cached_column(cache_key, texture, texture_x, target_height):
         column_cache.popitem(last=False)
     return col_surf
 
-
-QUANTIZE_HEIGHT = 4
-
-RAY_STEP = 8
-
-BRIGHTNESS_FALLOFF = 2
 #region Draw Funcs
-def draw_scene():
+def draw_scene(screen, h, w, ray_data, timer, player_energy):
     screen.fill((0, 0, 0))
-    ray_data = cast_rays()
-    draw_ray_data(ray_data)
+    draw_ray_data(ray_data, h, w)
     draw_sprites(SPRITES)
-    draw_energy()
-    draw_timer()
+    draw_energy(screen, h, w, player_energy)
+    draw_timer(screen, h, w, timer)
     screen.blit(VIGNETTE_SURF, (0, 0))
 
-def draw_energy():
+def draw_energy(screen, h, w, player_energy):
     c = int(255*(player_energy/100))
     color = (255, c, c)
-    energy_rect = pygame.Rect(int(WIDTH*0.02), int(HEIGHT*0.02), int(WIDTH*0.2*(player_energy/100)), int(HEIGHT*0.03))
-    bg_rect = pygame.Rect(int(WIDTH*0.02), int(HEIGHT*0.02), int(WIDTH*0.2), int(HEIGHT*0.03))
+    energy_rect = pygame.Rect(int(w*0.02), int(h*0.02), int(w*0.2*(player_energy/100)), int(h*0.03))
+    bg_rect = pygame.Rect(int(w*0.02), int(h*0.02), int(w*0.2), int(h*0.03))
     pygame.draw.rect(screen, (92, 92, 92), bg_rect)
     pygame.draw.rect(screen, color, energy_rect)
 
-def draw_timer():
-    minutes = TIMER//60
-    seconds = TIMER%60
+def draw_timer(screen, h, w, timer):
+    minutes = timer//60
+    seconds = timer%60
     text = f'{int(minutes):02}:{round(seconds):02}'
     timer_font = pygame.font.SysFont('Garamond', 32, False)
     timer_rec = timer_font.render(text, True, (128,128,128))
-    pos = (WIDTH//2-timer_rec.get_width()//2, HEIGHT - 1.2*timer_rec.get_height())
+    pos = (w//2-timer_rec.get_width()//2, h - 1.2*timer_rec.get_height())
     screen.blit(timer_rec, pos)
 
-def draw_ray_data(ray_data):
+def draw_ray_data(ray_data, h, w):
     textures = {
         1: WALL_TEXTURE,
         2: GOAL_WALL_TEXTURE,
@@ -198,16 +116,16 @@ def draw_ray_data(ray_data):
     for ray in ray_data:
         wall_height, screen_x, distance, side, grid_value, text_x, wall_pos = ray
         texture = textures[grid_value]
-        result = draw_ray(int(wall_height), screen_x, distance, side, grid_value, text_x, texture)
+        result = draw_ray(h, w, int(wall_height), screen_x, distance, side, grid_value, text_x, texture)
         if result:
             ray_blits.append(result)
 
     if ray_blits:
         screen.blits(ray_blits)
 
-def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, texture):
+def draw_ray(h, w, wall_height, screen_x, distance, side, grid_value, texture_x, texture):
     final_x = screen_x + bob_offset_x
-    if not 0 <= final_x < WIDTH:
+    if not 0 <= final_x < w:
         return
 
     if wall_height <= 0:
@@ -217,7 +135,7 @@ def draw_ray(wall_height, screen_x, distance, side, grid_value, texture_x, textu
         return
 
 
-    target_height = min(max(1, wall_height), HEIGHT*5)
+    target_height = min(max(1, wall_height), h*5)
     target_height = (target_height // QUANTIZE_HEIGHT) * QUANTIZE_HEIGHT
     
     half_h = target_height // 2
@@ -386,12 +304,12 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
             raw_dist = (side_dist_x - delta_distance_x + side_dist_y - delta_distance_y) / 2
 
 
-        if map_x < 0 or map_y < 0 or map_x >= GRID_WIDTH or map_y >= GRID_WIDTH:
+        if map_x < 0 or map_y < 0 or map_x >= cur_size or map_y >= cur_size:
             raw_dist = min(raw_dist, MAX_DISTANCE)
             break
 
         grid_value = world[map_y, map_x]
-        if 0 <= map_x < GRID_WIDTH and 0 <= map_y < GRID_HEIGHT:
+        if 0 <= map_x < cur_size and 0 <= map_y < cur_size:
             if grid_value != 0:
                 hit = True
         else:
@@ -424,7 +342,6 @@ def cast_single_ray(i, map_x, map_y, dir_x, dir_y, cos_correction):
 #endregion
 
 #region Player Controller Funcs
-exhausted_played = False
 ENERGY_FACTOR = 1
 def player_controller(delta_time):
     # Alle globalen vars die gebraucht werden
@@ -446,8 +363,8 @@ def player_controller(delta_time):
     min_fov = base_fov*0.95 # Beim Sprint base_fov -> min_fov
     dyn_fov_mult = 0.5 # Glättet verlauf der FOV
 
-    view_bob_frequency = 7 # streckt die Sinuswelle
-    view_bob_amplitude = 0.1 # in px
+    view_bob_frequency = 5 # staucht die Sinuswelle
+    view_bob_amplitude = 5 # Stärkefaktor
 
     forward = 0
     strafe = 0
@@ -475,21 +392,18 @@ def player_controller(delta_time):
     if forward < 1.5 and player_energy < 100:
         player_energy += energy_gain_factor * delta_time
         player_energy = min(player_energy, 100)
-        
-    if player_energy > 25:
-        exhausted_played = False
 
     keys = pygame.key.get_pressed()
     if keys[pygame.K_w]:
         if keys[pygame.K_LSHIFT]:
             forward = 0.75
-        elif keys[pygame.K_LCTRL] and not exhausted_played:
+        elif keys[pygame.K_LCTRL] and not player_sound_channel.get_busy():
             if player_energy > 0:
                 forward = 2
                 player_energy -= energy_loss_factor * delta_time
                 if player_energy <= 0:
                     player_energy = 0
-                    random_sound_channel.play(exhausted)
+                    player_sound_channel.play(exhausted)
                     exhausted_played = True
             if FOV > min_fov:
                 FOV -= (FOV - min_fov) * dyn_fov_mult * delta_time
@@ -531,8 +445,7 @@ def player_controller(delta_time):
         walk_cycle -= 0.25
         walk_cycle = max(walk_cycle, 0)
 
-
-    bob_offset_x = math.cos(walk_cycle * 0.5 * view_bob_frequency) * view_bob_amplitude * forward
+    bob_offset_x = math.cos(walk_cycle * view_bob_frequency) * view_bob_amplitude * forward
     bob_offset_y = view_bob_frequency * math.sin(walk_cycle * view_bob_frequency) * view_bob_amplitude * forward
 
     if moving and not footstep_channel.get_busy():
@@ -570,8 +483,6 @@ def check_distance_to_wall(px, py, margin = 0.15):
         if 0 <= ny < len(world) and 0 <= nx < len(world[0]):
             if world[ny][nx] != 0 and dist_frac < margin:
                 return False
-            
-    
     # diagonal
     diagonals = [
         (gx - 1, gy - 1, max(dx, dy)),          # oben links
@@ -757,13 +668,14 @@ class Patroller:
                 heartbeat_channel.fadeout(25)
             if not heartbeat_channel.get_busy():
                 heartbeat_channel.play(sound)
-            
 
     def update(self, deltatime):
         global player_x, player_y
+        self.distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
+        if self.distance_to_player <= MAX_VIEW_DISTANCE:
+            draw_sprites([self.as_sprite()])
         if not self.active:
             return
-        self.distance_to_player = math.sqrt((player_x-self.x) ** 2 + (player_y-self.y) ** 2)
         if self.distance_to_player < 8:
             path_to_player = a_star(world, (int(self.y), int(self.x)), (int(player_y), int(player_x)))
         else:
@@ -892,6 +804,7 @@ class Patroller:
 
 #region Items
 ITEMS = []
+BUFFS = []
 class Item:
     def __init__(self, pos):
         global SPRITES
@@ -908,8 +821,8 @@ class Item:
         types = [
             ['torch', 15, self.increase_max_view_dist, self.decrease_max_view_dist, TORCH_TEXTURE],
             ['cross', 30, self.set_patroller_inactive, self.set_patroller_active, CROSS_TEXTURE],
-            ['speed_boost', 10, self.speed_up_player, self.slow_down_player, SPEED_BOOST_TEXTURE],
-            ['crystal_ball', None, self.show_path, None, CRYSTAL_BALL_TEXTURE]
+            ['speed_boost', 20, self.speed_up_player, self.slow_down_player, SPEED_BOOST_TEXTURE],
+            ['crystal_ball', 4, self.show_path, None, CRYSTAL_BALL_TEXTURE]
         ]
 
         random_type = random.choice(types)
@@ -936,7 +849,7 @@ class Item:
 
     def speed_up_player(self):
         global player_speed_mult
-        player_speed_mult = 2
+        player_speed_mult = 1.25
     def slow_down_player(self):
         global player_speed_mult
         player_speed_mult = 1
@@ -954,10 +867,10 @@ class Item:
         if self.ability_used:
             self.time_passed += deltatime
             if self.time_passed >= self.duration:
-                if self.revert_ability_func is not None:
-                    self.revert_ability_func()
-                self.time_passed = 0
-                self.ability_used = False
+                BUFFS.remove(self.name)
+                if self.name not in BUFFS:
+                    if self.revert_ability_func is not None:
+                        self.revert_ability_func()
                 ITEMS.remove(self)
             return
         else:
@@ -969,10 +882,11 @@ class Item:
                 if self.ability_func is not None:
                     self.ability_func()
                     self.ability_used = True
+                    BUFFS.append(self.name)
                     SPRITES.remove(self.sprite_dict)
 
 def spawn_items():
-    empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[y, x] == 0]
+    empty_cells = [(y, x) for y in range(cur_size) for x in range(cur_size) if world[y, x] == 0]
     dead_ends = []
     for pos in empty_cells:
         r, c = pos
@@ -985,7 +899,7 @@ def spawn_items():
     
     random.shuffle(dead_ends)
     for pos in dead_ends:
-        if random.randint(1, 10) == 10:
+        if random.randint(1, 10) > 8:
             item_pos = pos[0]+0.5, pos[1]+0.5
             item = Item(item_pos)
             ITEMS.append(item)
@@ -993,7 +907,7 @@ def spawn_items():
 
 #region Worldgeneration
 def place_checkpoints(start, end):
-    empty_cells = [(y, x) for y in range(GRID_HEIGHT) for x in range(GRID_WIDTH) if world[y, x] == 0]
+    empty_cells = [(y, x) for y in range(cur_size) for x in range(cur_size) if world[y, x] == 0]
     candidates = []
     for pos in empty_cells:
         r, c = pos
@@ -1021,7 +935,7 @@ def place_checkpoints(start, end):
         world[cur_best] = 4
 
 def create_world():
-    global world, player_y, player_x, GRID_HEIGHT, GRID_WIDTH, cur_size
+    global world, player_y, player_x, cur_size, cur_size, cur_size
     cur_size += 16
     cur_size %= 144
     cur_size = max(cur_size, 16)
@@ -1041,7 +955,7 @@ def loading_screen(text):
 # Main Loop
 patroller = None
 def main():
-    global cam_pitch, player_view, PLAYING, GRID_HEIGHT, GRID_WIDTH, \
+    global cam_pitch, player_view, PLAYING, cur_size, cur_size, \
         player_x, player_y, player_spawn, world, TIMER, SPRITES, ENERGY_FACTOR,\
         patroller, end_pos
     mouse_visible = False
@@ -1049,16 +963,16 @@ def main():
     pygame.mouse.set_visible(mouse_visible)
     pygame.event.set_grab(mouse_grab)
 
-    spray_cooldown = 1.0
-    last_sprayed = 1.0
+    glowstick_cooldown = 1.0
+    last_thrown = 1.0
     
     # World Creation and Setup
     if not PLAYING:
         TIMER = 0
         while True:
             loading_screen('Generating Maze...')
-            world = wilsons_maze(cur_size, cur_size, 5)
-            GRID_HEIGHT, GRID_WIDTH = len(world), len(world[0])
+            world = wilsons_maze(cur_size, cur_size, cur_size//8)
+            cur_size = len(world) - 1
             # Pathfind weg erstellen
             end_pos, start_pos = set_spawn_and_end()
             maze_path = a_star(world, start_pos, end_pos)
@@ -1067,7 +981,7 @@ def main():
             if len(maze_path) > cur_size:
                 break
 
-        if GRID_HEIGHT > 16:
+        if cur_size > 16:
             loading_screen('Placing Checkpoints...')
             place_checkpoints(start_pos, end_pos)
 
@@ -1079,9 +993,8 @@ def main():
         spawn_items()
 
         player_spawn = player_y, player_x = start_pos[0] + 0.5, start_pos[1] + 0.5
-        SPRITES.append({'x': patroller.x, 'y': patroller.y, 'texture': patroller.front})
 
-        ENERGY_FACTOR = 128/cur_size
+        ENERGY_FACTOR = max(128/cur_size, 4)
         PLAYING = True
 
     # Fallback
@@ -1108,12 +1021,12 @@ def main():
                     pygame.event.set_grab(mouse_grab)
                 
                 if event.key == pygame.K_f:
-                    if last_sprayed >= spray_cooldown:
+                    if last_thrown >= glowstick_cooldown:
                         col = random.choice(glowstick_colors)
                         glowstick_tex = GLOWSTICK_TEXTURE.copy()
                         glowstick_tex.fill(col, special_flags=pygame.BLEND_RGBA_MULT)
                         SPRITES.append({'x': player_x, 'y': player_y, 'texture': glowstick_tex})
-                        last_sprayed = 0
+                        last_thrown = 0
 
             if event.type == pygame.WINDOWFOCUSLOST:
                 menu()
@@ -1123,18 +1036,16 @@ def main():
                 pygame.event.set_grab(mouse_grab)
 
         handle_random_sounds()
-        draw_scene()
+        ray_data = cast_rays()
+        draw_scene(screen, HEIGHT, WIDTH, ray_data, TIMER, player_energy)
         player_controller(delta_time)
 
         patroller.update(delta_time)
-        if patroller.distance_to_player <= MAX_VIEW_DISTANCE:
-            draw_sprites([patroller.as_sprite()])
-
         for i in ITEMS:
             i.update(delta_time)
 
-        if last_sprayed < spray_cooldown:
-            last_sprayed += delta_time
+        if last_thrown < glowstick_cooldown:
+            last_thrown += delta_time
         
         pygame.display.update()
 
@@ -1229,7 +1140,9 @@ def menu():
         if not PLAYING:
             screen.blit(pygame.transform.scale(BG_IMAGE, screen.get_size()), (0, 0))
         else:
-            draw_scene()
+
+            ray_data = cast_rays()
+            draw_scene(screen, HEIGHT, WIDTH, ray_data, TIMER, player_energy)
         screen.blit(menu_text, (int(WIDTH*0.5 - menu_text.get_width()*0.5), 64))
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
