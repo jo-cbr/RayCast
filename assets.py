@@ -1,7 +1,5 @@
-import pygame, random
-WIDTH, HEIGHT = 1920, 1080
-center_y = HEIGHT // 2
-screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=True)
+import random
+from constants import *
 
 # Textures
 BG_IMAGE = pygame.image.load('assets/main_background.png').convert()

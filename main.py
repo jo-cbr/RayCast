@@ -1,12 +1,11 @@
-import pygame, math
 from pygame_button import Button
 from maze_generator import *
 from collections import OrderedDict
 from assets import *
+from constants import *
 
 pygame.init()
 clock = pygame.time.Clock()
-FPS = 60
 
 cur_size = 32
 world = wilsons_maze(cur_size, cur_size, 6)
@@ -33,21 +32,11 @@ def set_spawn_and_end():
     p2 = random.choice(spawn_points)
 
     return p1, p2
-
 end_pos, start_pos = set_spawn_and_end()
+
 TIMER = 0
 
-PROJ_PLANE = (WIDTH / 2) / math.tan(math.radians(60) * 0.5)
-QUANTIZE_HEIGHT = 4
-RAY_STEP = 8
-BRIGHTNESS_FALLOFF = 2
-Z_BUFFER = [0.0] * WIDTH
-MAX_DISTANCE = 32
-MAX_VIEW_DISTANCE = 8
-
 column_cache = OrderedDict()
-CACHE_MAX_SIZE = 4096
-
 def get_cached_column(cache_key, texture, texture_x, target_height):
     col_surf = column_cache.get(cache_key)
     if col_surf is not None:
@@ -216,7 +205,6 @@ def draw_sprites(sprites, player):
         screen.blits(blits)
 
 #endregion
-
 #region Ray Cast Funcs
 def cast_rays(world, raystep, w, player):
     ray_data = []
@@ -945,7 +933,7 @@ def loading_screen(text):
     screen.blit(loading_text, text_rect.topleft)
     pygame.display.update()
 #endregion
-# Main Loop
+#region Gameloop
 patroller = Patroller(world)
 player = PlayerController(world, start_pos, HEIGHT, WIDTH, footstep_channel, player_sound_channel)
 
@@ -1039,7 +1027,7 @@ def main(new_game):
             last_thrown += deltatime
         
         pygame.display.update()
-
+#endregion
 #region Buttons and Main Menu
 def quit_func():
     global PLAYING
