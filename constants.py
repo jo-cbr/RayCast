@@ -1,10 +1,12 @@
 import math, pygame
 
+pygame.init()
+
 FPS = 60
 
 WIDTH, HEIGHT = 1920, 1080
 center_y = HEIGHT // 2
-screen = pygame.display.set_mode((WIDTH, HEIGHT), vsync=True)
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
 PROJ_PLANE = (WIDTH / 2) / math.tan(math.radians(60) * 0.5)
 QUANTIZE_HEIGHT = 4
@@ -15,3 +17,6 @@ MAX_DISTANCE = 32
 MAX_VIEW_DISTANCE = 8
 
 CACHE_MAX_SIZE = 4096
+
+HUD_FONT = pygame.font.SysFont('Garamond', 32, False)
+button_font = pygame.font.SysFont('Garamond', 48)

@@ -4,7 +4,7 @@ from collections import OrderedDict
 from assets import *
 from constants import *
 
-pygame.init()
+#pygame.init()
 clock = pygame.time.Clock()
 
 cur_size = 32
@@ -60,6 +60,7 @@ def draw_scene(screen, h, w, ray_data, timer, player):
     draw_sprites(SPRITES, player)
     draw_energy(screen, h, w, player.energy)
     draw_timer(screen, h, w, timer)
+    draw_fps(screen, h, w, clock)
     screen.blit(VIGNETTE_SURF, (0, 0))
 
 def draw_energy(screen, h, w, player_energy):
@@ -70,14 +71,18 @@ def draw_energy(screen, h, w, player_energy):
     pygame.draw.rect(screen, (92, 92, 92), bg_rect)
     pygame.draw.rect(screen, color, energy_rect)
 
+def draw_fps(screen, h, w, clock):
+    text = f'{clock.get_fps():.0f} FPS'
+    text_rect = HUD_FONT.render(text, True, (128,128,128))
+    screen.blit(text_rect, (w - text_rect.get_width() - 10, 10))
+
 def draw_timer(screen, h, w, timer):
     minutes = timer//60
     seconds = timer%60
     text = f'{int(minutes):02}:{round(seconds):02}'
-    timer_font = pygame.font.SysFont('Garamond', 32, False)
-    timer_rec = timer_font.render(text, True, (128,128,128))
-    pos = (w//2-timer_rec.get_width()//2, h - 1.2*timer_rec.get_height())
-    screen.blit(timer_rec, pos)
+    timer_rect = HUD_FONT.render(text, True, (128,128,128))
+    pos = (w//2-timer_rect.get_width()//2, h - 1.2*timer_rect.get_height())
+    screen.blit(timer_rect, pos)
 
 def draw_ray_data(ray_data, h, w, player):
     textures = {
@@ -153,6 +158,7 @@ def draw_sprites(sprites, player):
     inv_det = 1 / det
 
     blits = []
+    spacing_factor = 8
 
     # Sprites nach Distanz sortieren
     sprites.sort(key = lambda s: (s['x']-player.x)**2 + (s['y']-player.y)**2, reverse=True)
@@ -189,7 +195,7 @@ def draw_sprites(sprites, player):
         
         draw_start_x = -sprite_width // 2 + sprite_screen_x
         if draw_start_x < -sprite_width: draw_start_x = 0
-        draw_end_x = sprite_width // 2 + sprite_screen_x
+        draw_end_x = sprite_width // 2 + sprite_screen_x - spacing_factor
         if draw_end_x >= WIDTH: draw_end_x = WIDTH - 1
 
         scaled_texture = pygame.transform.scale(texture, (sprite_width, sprite_height))
@@ -197,7 +203,7 @@ def draw_sprites(sprites, player):
             if stripe < 0 or stripe > WIDTH: continue
             if transform_y < Z_BUFFER[stripe]:
                 tex_x = min(int((stripe - draw_start_x) * scaled_texture.get_width() / sprite_width), scaled_texture.get_width()-10)
-                column = scaled_texture.subsurface((tex_x, 0, 8, sprite_height))
+                column = scaled_texture.subsurface((tex_x, 0, spacing_factor, sprite_height))
 
                 blits.append((column, (stripe, draw_start_y)))
 
@@ -321,8 +327,8 @@ class PlayerController:
         self.sh = screen_h
         self.sw = screen_w
 
-        self.spawnpos = spawn
-        self.y, self.x = self.spawnpos[0] + 0.5, self.spawnpos[1] + 0.5
+        self.spawnpos = spawn[0] + 0.5, spawn[1] + 0.5
+        self.y, self.x = self.spawnpos[0], self.spawnpos[1]
 
         self.fov = math.radians(60)
         self.base_fov = self.fov
@@ -331,7 +337,7 @@ class PlayerController:
         self.dynamic_fov_mult = 0.5
 
         self.angle = math.radians(0)
-        self.move_speed = 1
+        self.move_speed = 1.0
         self.strafe_speed = 0.75
         self.rot_speed = 45
 
@@ -372,6 +378,7 @@ class PlayerController:
                     menu(False)
                 if result[4] == 4 and result[2] <= 1.5:
                     world[result[6]] = 5
+                    item_sound_channel.play(gong_sound)
                     self.spawnpos = int(self.x) + 0.5, int(self.y) + 0.5
 
         if forward < 1.5 and self.energy < 100:
@@ -860,8 +867,9 @@ class Item:
             if distance_to_player > 1:
                 return
             
-            if distance_to_player < 0.04:
+            if distance_to_player < 0.1:
                 if self.ability_func is not None:
+                    item_sound_channel.play(gong_sound)
                     self.ability_func()
                     self.ability_used = True
                     BUFFS.append(self.name)
@@ -938,7 +946,7 @@ patroller = Patroller(world)
 player = PlayerController(world, start_pos, HEIGHT, WIDTH, footstep_channel, player_sound_channel)
 
 def main(new_game):
-    global cur_size, world, TIMER, SPRITES, patroller, end_pos, player
+    global cur_size, world, TIMER, SPRITES, patroller, end_pos, player, start_pos
     
     mouse_visible = False
     mouse_grab = True
@@ -1029,9 +1037,8 @@ def main(new_game):
         pygame.display.update()
 #endregion
 #region Buttons and Main Menu
-def quit_func():
-    global PLAYING
-    if not PLAYING:
+def quit_func(playing):
+    if not playing:
         pygame.quit()
         pygame.mixer.quit()
         exit(0)
@@ -1049,13 +1056,7 @@ def menu(playing):
     menu_color = (192, 192, 192)
     color = (128, 128, 128)
     hover_color = (96, 96, 96)
-    button_font = pygame.font.SysFont('Garamond', 48)
-
-    click_sound = pygame.mixer.Sound('assets/click.wav')
-    click_sound.set_volume(2)
-    hover_sound = pygame.mixer.Sound('assets/hover.wav')
-    hover_sound.set_volume(0.25)
-
+    
     start_button_args = {
         'text': 'PLAY' if not playing else 'CONTINUE',
         'font': button_font,
@@ -1101,8 +1102,9 @@ def menu(playing):
         'click_sound': click_sound,
         'hover_sound': hover_sound,
     }
+    quit_func_helper = lambda: quit_func(playing)
     quit_button_rect = pygame.Rect(int(WIDTH*0.5-196), 128, 392, 128)
-    quit_button = Button(quit_button_rect, color, quit_func, **quit_button_args)
+    quit_button = Button(quit_button_rect, color, quit_func_helper, **quit_button_args)
     quit_button.rect.center = (int(WIDTH*0.5), int(HEIGHT*0.8))
 
     menu_font = pygame.font.SysFont('Garamond', 128)
